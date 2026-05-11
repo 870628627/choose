@@ -4,3 +4,4 @@ dist/
 *.log
 server/data/*.db
 server/data/*.db-*
+storage/

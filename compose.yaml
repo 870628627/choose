@@ -1,0 +1,32 @@
+services:
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    restart: unless-stopped
+    environment:
+      PORT: "3001"
+      DATABASE_PATH: ./data/app.db
+      DATA_WORKER_PYTHON: python
+      DATA_WORKER_PATH: ../data-worker/worker.py
+      DATA_WORKER_TIMEOUT_MS: "60000"
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN:-}
+      AI_PROVIDER: ${AI_PROVIDER:-mock}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-}
+    volumes:
+      - ./storage/sqlite:/app/server/data
+    expose:
+      - "3001"
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    restart: unless-stopped
+    depends_on:
+      - server
+    ports:
+      - "80:80"

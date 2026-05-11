@@ -1,0 +1,37 @@
+name: Deploy to Aliyun ECS
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      ALIYUN_HOST: ${{ secrets.ALIYUN_HOST }}
+      ALIYUN_USER: ${{ secrets.ALIYUN_USER }}
+      ALIYUN_PORT: ${{ secrets.ALIYUN_PORT }}
+      ALIYUN_SSH_KEY: ${{ secrets.ALIYUN_SSH_KEY }}
+
+    steps:
+      - name: Skip when Aliyun secrets are not configured
+        if: ${{ env.ALIYUN_HOST == '' || env.ALIYUN_USER == '' || env.ALIYUN_SSH_KEY == '' }}
+        run: |
+          echo "Aliyun deployment secrets are not configured yet. Skipping deploy."
+
+      - name: Deploy on ECS over SSH
+        if: ${{ env.ALIYUN_HOST != '' && env.ALIYUN_USER != '' && env.ALIYUN_SSH_KEY != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ env.ALIYUN_HOST }}
+          username: ${{ env.ALIYUN_USER }}
+          key: ${{ env.ALIYUN_SSH_KEY }}
+          port: ${{ env.ALIYUN_PORT || '22' }}
+          script: |
+            set -e
+            cd /opt/choose
+            git fetch origin main
+            git reset --hard origin/main
+            docker compose up -d --build
+            docker image prune -f
