@@ -59,7 +59,13 @@ KNOWN_STOCKS: Dict[str, Dict[str, str]] = {
     "000063": {"name": "中兴通讯", "industry": "通信设备", "company_profile": "主营通信设备和解决方案。"},
     "002230": {"name": "科大讯飞", "industry": "软件开发", "company_profile": "主营智能语音、人工智能产品和行业解决方案。"},
     "300014": {"name": "亿纬锂能", "industry": "电池", "company_profile": "主营消费电池、动力电池和储能电池。"},
-    "000568": {"name": "泸州老窖", "industry": "白酒", "company_profile": "主营白酒生产与销售。"}
+    "000568": {"name": "泸州老窖", "industry": "白酒", "company_profile": "主营白酒生产与销售。"},
+    "688728": {"name": "格科微", "industry": "半导体", "company_profile": "主营 CMOS 图像传感器和显示驱动芯片等集成电路产品。"},
+    "603501": {"name": "韦尔股份", "industry": "半导体", "company_profile": "主营半导体设计、图像传感器和模拟芯片等业务。"},
+    "688213": {"name": "思特威", "industry": "半导体", "company_profile": "主营高性能 CMOS 图像传感器芯片研发、设计和销售。"},
+    "688469": {"name": "芯联集成", "industry": "半导体", "company_profile": "主营特色工艺晶圆代工及相关半导体制造服务。"},
+    "688649": {"name": "盛美上海", "industry": "半导体设备", "company_profile": "主营半导体专用设备研发、生产和销售。"},
+    "688981": {"name": "中芯国际", "industry": "半导体", "company_profile": "主营集成电路晶圆代工及配套服务。"}
 }
 
 
@@ -99,6 +105,28 @@ def try_akshare():
         return None
 
 
+def allow_demo_data() -> bool:
+    return os.environ.get("DATA_ALLOW_DEMO", "").lower() in {"1", "true", "yes"}
+
+
+def market_suffix(code: str) -> str:
+    market = detect_market(code)
+    if market == "SH":
+        return f"{code}.SH"
+    if market == "SZ":
+        return f"{code}.SZ"
+    if market == "BJ":
+        return f"{code}.BJ"
+    return code
+
+
+def tx_symbol(code: str) -> str:
+    market = detect_market(code).lower()
+    if market in {"sh", "sz"}:
+        return f"{market}{code}"
+    return code
+
+
 def fetch_stock_basic(code: str) -> Dict[str, Any]:
     basic = fallback_basic(code)
     if code in KNOWN_STOCKS:
@@ -136,12 +164,57 @@ def fetch_daily_metrics(code: str) -> List[Dict[str, Any]]:
     ak = try_akshare()
     if ak:
         try:
+            value_df = ak.stock_value_em(symbol=code)
+            rows = []
+            for _, row in value_df.tail(20).iterrows():
+                trade_date = str(row.get("数据日期", ""))[:10]
+                if not trade_date:
+                    continue
+                rows.append({
+                    "trade_date": trade_date,
+                    "close_price": _to_float(row.get("当日收盘价")),
+                    "pe": _to_float(row.get("PE(静)")),
+                    "pe_ttm": _to_float(row.get("PE(TTM)")),
+                    "pb": _to_float(row.get("市净率")),
+                    "ps": _to_float(row.get("市销率")),
+                    "dividend_yield": None,
+                    "market_cap": _to_float(row.get("总市值")),
+                    "turnover_rate": None,
+                    "source": "akshare-eastmoney-value"
+                })
+            if rows:
+                return rows
+        except Exception:
+            pass
+
+        try:
+            hist = ak.stock_zh_a_hist_tx(symbol=tx_symbol(code))
+            rows = []
+            for _, row in hist.tail(20).iterrows():
+                trade_date = str(row.get("date", ""))[:10]
+                if not trade_date:
+                    continue
+                rows.append({
+                    "trade_date": trade_date,
+                    "close_price": _to_float(row.get("close")),
+                    "pe": None,
+                    "pe_ttm": None,
+                    "pb": None,
+                    "ps": None,
+                    "dividend_yield": None,
+                    "market_cap": None,
+                    "turnover_rate": None,
+                    "source": "akshare-tencent"
+                })
+            if rows:
+                return rows
+        except Exception:
+            pass
+
+        try:
             end = date.today().strftime("%Y%m%d")
             start = (date.today() - timedelta(days=45)).strftime("%Y%m%d")
             hist = ak.stock_zh_a_hist(symbol=code, period="daily", start_date=start, end_date=end, adjust="")
-            rng = stable_random(f"{code}-valuation")
-            fallback_pe = rng.uniform(8, 65)
-            fallback_pb = rng.uniform(0.8, 9)
 
             rows = []
             for _, row in hist.tail(20).iterrows():
@@ -149,19 +222,22 @@ def fetch_daily_metrics(code: str) -> List[Dict[str, Any]]:
                 rows.append({
                     "trade_date": trade_date,
                     "close_price": _to_float(row.get("收盘")),
-                    "pe": round(fallback_pe * rng.uniform(0.96, 1.04), 2),
-                    "pe_ttm": round(fallback_pe * rng.uniform(0.96, 1.04), 2),
-                    "pb": round(fallback_pb * rng.uniform(0.96, 1.04), 2),
-                    "ps": round(rng.uniform(1, 12), 2),
-                    "dividend_yield": round(rng.uniform(0, 4.5), 2),
+                    "pe": None,
+                    "pe_ttm": None,
+                    "pb": None,
+                    "ps": None,
+                    "dividend_yield": None,
                     "market_cap": None,
                     "turnover_rate": _to_float(row.get("换手率")),
-                    "source": "akshare+demo-valuation"
+                    "source": "akshare"
                 })
             if rows:
                 return rows
         except Exception:
             pass
+
+    if not allow_demo_data():
+        return []
 
     rng = stable_random(code)
     today = date.today()
@@ -189,6 +265,36 @@ def fetch_daily_metrics(code: str) -> List[Dict[str, Any]]:
 
 
 def fetch_financials(code: str) -> List[Dict[str, Any]]:
+    ak = try_akshare()
+    if ak:
+        try:
+            df = ak.stock_financial_analysis_indicator_em(symbol=market_suffix(code))
+            rows = []
+            for _, row in df.head(12).iterrows():
+                report_period = str(row.get("REPORT_DATE", ""))[:10]
+                if not report_period:
+                    continue
+                rows.append({
+                    "report_period": report_period,
+                    "revenue": _to_float(row.get("TOTALOPERATEREVE")),
+                    "net_profit": _to_float(row.get("PARENTNETPROFIT")),
+                    "revenue_growth": _to_float(row.get("TOTALOPERATEREVETZ")),
+                    "net_profit_growth": _to_float(row.get("PARENTNETPROFITTZ")),
+                    "gross_margin": _to_float(row.get("XSMLL")),
+                    "net_margin": _to_float(row.get("XSJLL")),
+                    "roe": _to_float(row.get("ROEJQ")),
+                    "debt_asset_ratio": _to_float(row.get("ZCFZL")),
+                    "operating_cash_flow": None,
+                    "source": "akshare-eastmoney"
+                })
+            if rows:
+                return rows
+        except Exception:
+            pass
+
+    if not allow_demo_data():
+        return []
+
     rng = stable_random(f"{code}-financial")
     periods = ["2023-12-31", "2024-06-30", "2024-12-31", "2025-06-30", "2025-12-31"]
     revenue = rng.uniform(80, 2500)
@@ -216,6 +322,28 @@ def fetch_financials(code: str) -> List[Dict[str, Any]]:
 
 
 def fetch_announcements(code: str) -> List[Dict[str, Any]]:
+    ak = try_akshare()
+    if ak:
+        try:
+            df = ak.stock_individual_notice_report(security=code)
+            rows = []
+            for _, row in df.head(30).iterrows():
+                rows.append({
+                    "title": clean_text(row.get("公告标题")),
+                    "published_at": str(row.get("公告日期") or "")[:10],
+                    "announcement_type": clean_text(row.get("公告类型")),
+                    "url": str(row.get("网址") or ""),
+                    "source": "akshare-eastmoney"
+                })
+            rows = [item for item in rows if item["title"] and item["published_at"]]
+            if rows:
+                return rows
+        except Exception:
+            pass
+
+    if not allow_demo_data():
+        return []
+
     basic = fallback_basic(code)
     today = date.today()
     templates = [
@@ -253,6 +381,17 @@ def _to_float(value: Any):
         return float(value)
     except Exception:
         return None
+
+
+def clean_text(value: Any) -> str:
+    text = "" if value is None else str(value)
+    if any(marker in text for marker in ["æ", "è", "å", "ã"]):
+        for encoding in ("latin1", "cp1252"):
+            try:
+                return text.encode(encoding).decode("utf-8")
+            except Exception:
+                continue
+    return text
 
 
 def emit(payload: Any):

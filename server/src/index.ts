@@ -305,6 +305,67 @@ app.get("/api/sync-logs", (_req, res) => {
   res.json(db.prepare("SELECT * FROM sync_logs ORDER BY started_at DESC LIMIT 50").all());
 });
 
+app.get("/api/data-quality", (_req, res) => {
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        s.code,
+        s.name,
+        s.industry,
+        dm.trade_date AS latest_trade_date,
+        dm.close_price,
+        dm.source AS daily_source,
+        fm.report_period AS latest_report_period,
+        fm.source AS financial_source,
+        (
+          SELECT COUNT(*) FROM daily_metrics
+          WHERE stock_id = s.id AND source LIKE '%demo%'
+        ) AS demo_daily_rows,
+        (
+          SELECT COUNT(*) FROM financial_metrics
+          WHERE stock_id = s.id AND source LIKE '%demo%'
+        ) AS demo_financial_rows,
+        (
+          SELECT COUNT(*) FROM announcements
+          WHERE stock_id = s.id AND source LIKE '%demo%'
+        ) AS demo_announcement_rows
+      FROM stocks s
+      LEFT JOIN daily_metrics dm ON dm.id = (
+        SELECT id FROM daily_metrics
+        WHERE stock_id = s.id
+        ORDER BY trade_date DESC
+        LIMIT 1
+      )
+      LEFT JOIN financial_metrics fm ON fm.id = (
+        SELECT id FROM financial_metrics
+        WHERE stock_id = s.id
+        ORDER BY report_period DESC
+        LIMIT 1
+      )
+      ORDER BY s.code ASC
+    `
+    )
+    .all() as Array<Record<string, unknown>>;
+
+  const today = new Date().toISOString().slice(0, 10);
+  res.json(
+    rows.map((row) => {
+      const issues = [];
+      if (!row.industry || row.industry === "未识别行业") issues.push("行业未识别");
+      if (!row.latest_trade_date || !row.close_price) issues.push("缺少真实行情");
+      if (!row.latest_report_period) issues.push("缺少真实财务");
+      if (Number(row.demo_daily_rows) || Number(row.demo_financial_rows) || Number(row.demo_announcement_rows)) {
+        issues.push("存在演示数据");
+      }
+      if (row.latest_trade_date && String(row.latest_trade_date) < today.slice(0, 8) + "01") {
+        issues.push("行情可能过旧");
+      }
+      return { ...row, issues };
+    })
+  );
+});
+
 app.post("/api/sync", async (req, res, next) => {
   const startedAt = new Date().toISOString();
   const targetCode = typeof req.body?.code === "string" ? req.body.code : null;

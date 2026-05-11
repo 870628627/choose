@@ -10,7 +10,7 @@ import {
   Trash2
 } from "lucide-react";
 import { api } from "./api";
-import type { StockDetail, StockListItem, SyncLog } from "./types";
+import type { DataQualityRow, StockDetail, StockListItem, SyncLog } from "./types";
 
 type View = "home" | "detail" | "compare" | "risks" | "reviews" | "sync";
 
@@ -327,17 +327,17 @@ function DetailView({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="overflow-x-auto rounded border border-line bg-white">
                 <table className="data-table">
-                  <thead><tr><th>日期</th><th>收盘价</th><th>PE_TTM</th><th>PB</th><th>换手率</th></tr></thead>
+                  <thead><tr><th>日期</th><th>收盘价</th><th>PE_TTM</th><th>PB</th><th>换手率</th><th>来源</th></tr></thead>
                   <tbody>{detail.daily_metrics.slice(0, 5).map((row) => (
-                    <tr key={String(row.id)}><td>{row.trade_date}</td><td>{formatNumber(row.close_price)}</td><td>{formatNumber(row.pe_ttm)}</td><td>{formatNumber(row.pb)}</td><td>{formatNumber(row.turnover_rate)}</td></tr>
+                    <tr key={String(row.id)}><td>{row.trade_date}</td><td>{formatNumber(row.close_price)}</td><td>{formatNumber(row.pe_ttm)}</td><td>{formatNumber(row.pb)}</td><td>{formatNumber(row.turnover_rate)}</td><td>{row.source || "-"}</td></tr>
                   ))}</tbody>
                 </table>
               </div>
               <div className="overflow-x-auto rounded border border-line bg-white">
                 <table className="data-table">
-                  <thead><tr><th>报告期</th><th>营收增速</th><th>净利增速</th><th>ROE</th><th>负债率</th></tr></thead>
+                  <thead><tr><th>报告期</th><th>营收增速</th><th>净利增速</th><th>ROE</th><th>负债率</th><th>来源</th></tr></thead>
                   <tbody>{detail.financial_metrics.slice(0, 5).map((row) => (
-                    <tr key={String(row.id)}><td>{row.report_period}</td><td>{formatNumber(row.revenue_growth)}%</td><td>{formatNumber(row.net_profit_growth)}%</td><td>{formatNumber(row.roe)}%</td><td>{formatNumber(row.debt_asset_ratio)}%</td></tr>
+                    <tr key={String(row.id)}><td>{row.report_period}</td><td>{formatNumber(row.revenue_growth)}%</td><td>{formatNumber(row.net_profit_growth)}%</td><td>{formatNumber(row.roe)}%</td><td>{formatNumber(row.debt_asset_ratio)}%</td><td>{row.source || "-"}</td></tr>
                   ))}</tbody>
                 </table>
               </div>
@@ -522,8 +522,13 @@ function ReviewsView({ stocks }: { stocks: StockListItem[] }) {
 
 function SyncView({ reloadStocks }: { reloadStocks: () => Promise<void> }) {
   const [logs, setLogs] = useState<SyncLog[]>([]);
+  const [qualityRows, setQualityRows] = useState<DataQualityRow[]>([]);
   const [busy, setBusy] = useState(false);
-  const load = () => api.syncLogs().then((data) => setLogs(data as SyncLog[]));
+  const load = async () => {
+    const [logData, qualityData] = await Promise.all([api.syncLogs(), api.dataQuality()]);
+    setLogs(logData as SyncLog[]);
+    setQualityRows(qualityData as DataQualityRow[]);
+  };
   useEffect(() => { load(); }, []);
 
   const syncAll = async () => {
@@ -548,6 +553,25 @@ function SyncView({ reloadStocks }: { reloadStocks: () => Promise<void> }) {
           {busy ? "同步中" : "同步全部自选股"}
         </button>
       </div>
+      <Section title="数据质量检查">
+        <div className="overflow-x-auto rounded border border-line bg-white">
+          <table className="data-table">
+            <thead><tr><th>代码</th><th>名称</th><th>行业</th><th>最新行情</th><th>行情来源</th><th>最新财报</th><th>财务来源</th><th>问题</th></tr></thead>
+            <tbody>{qualityRows.map((row) => (
+              <tr key={row.code}>
+                <td className="font-mono">{row.code}</td>
+                <td>{row.name}</td>
+                <td>{row.industry || "-"}</td>
+                <td>{row.latest_trade_date ? `${row.latest_trade_date} / ${formatNumber(row.close_price)}` : "-"}</td>
+                <td>{row.daily_source || "-"}</td>
+                <td>{row.latest_report_period || "-"}</td>
+                <td>{row.financial_source || "-"}</td>
+                <td><Tags tags={row.issues.length ? row.issues : ["通过"]} /></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </Section>
       <div className="overflow-x-auto rounded border border-line bg-white">
         <table className="data-table">
           <thead><tr><th>类型</th><th>目标</th><th>状态</th><th>开始</th><th>结束</th><th>错误</th></tr></thead>

@@ -29,6 +29,7 @@ export const api = {
       body: JSON.stringify(code ? { code } : {})
     }),
   syncLogs: () => request("/api/sync-logs"),
+  dataQuality: () => request("/api/data-quality"),
   addNote: (code: string, author: string, content: string) =>
     request(`/api/stocks/${code}/notes`, {
       method: "POST",

@@ -16,6 +16,7 @@ mkdirSync(path.dirname(databasePath), { recursive: true });
 export const db = new DatabaseSync(databasePath);
 
 initializeSchema(db);
+purgeDemoData();
 
 export function getStockByCode(code: string) {
   return db.prepare("SELECT * FROM stocks WHERE code = ?").get(code);
@@ -55,4 +56,17 @@ export function listStocks() {
     `
     )
     .all();
+}
+
+function purgeDemoData() {
+  if (["1", "true", "yes"].includes(String(process.env.DATA_ALLOW_DEMO || "").toLowerCase())) {
+    return;
+  }
+
+  db.exec(`
+    DELETE FROM daily_metrics WHERE source LIKE '%demo%';
+    DELETE FROM financial_metrics WHERE source LIKE '%demo%';
+    DELETE FROM announcements WHERE source LIKE '%demo%';
+    DELETE FROM research_scores;
+  `);
 }

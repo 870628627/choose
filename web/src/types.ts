@@ -42,3 +42,18 @@ export type SyncLog = {
   error_message?: string;
   detail_json?: string;
 };
+
+export type DataQualityRow = {
+  code: string;
+  name: string;
+  industry?: string;
+  latest_trade_date?: string;
+  close_price?: number;
+  daily_source?: string;
+  latest_report_period?: string;
+  financial_source?: string;
+  demo_daily_rows: number;
+  demo_financial_rows: number;
+  demo_announcement_rows: number;
+  issues: string[];
+};

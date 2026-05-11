@@ -31,7 +31,7 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
 
     const timer = setTimeout(() => {
       child.kill();
-      console.warn(`data-worker ${task} timed out; using demo fallback`);
+      console.warn(`data-worker ${task} timed out; using fallback`);
       finish(fallbackWorker(task, args) as T);
     }, Number(process.env.DATA_WORKER_TIMEOUT_MS || 60000));
 
@@ -47,7 +47,7 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
     child.on("close", (code) => {
       if (settled) return;
       if (code !== 0) {
-        console.warn(stderr || `data-worker exited with code ${code}; using demo fallback`);
+        console.warn(stderr || `data-worker exited with code ${code}; using fallback`);
         finish(fallbackWorker(task, args) as T);
         return;
       }
@@ -55,7 +55,7 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
       try {
         finish(JSON.parse(stdout) as T);
       } catch (error) {
-        console.warn(`data-worker returned invalid JSON: ${(error as Error).message}; using demo fallback`);
+        console.warn(`data-worker returned invalid JSON: ${(error as Error).message}; using fallback`);
         finish(fallbackWorker(task, args) as T);
       }
     });
@@ -65,6 +65,13 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
 function fallbackWorker(task: string, args: Record<string, string>) {
   const code = args.code || "";
   if (task === "fetch_stock_basic") return fallbackBasic(code);
+  if (!allowDemoData()) {
+    if (task === "sync_all") {
+      const codes = (args.codes || "").split(",").map((item) => item.trim()).filter(Boolean);
+      return { stocks: codes.map((item) => ({ basic: fallbackBasic(item), daily_metrics: [], financial_metrics: [], announcements: [] })) };
+    }
+    return [];
+  }
   if (task === "fetch_daily_metrics") return fallbackDaily(code);
   if (task === "fetch_financials") return fallbackFinancials(code);
   if (task === "fetch_announcements") return fallbackAnnouncements(code);
@@ -73,6 +80,10 @@ function fallbackWorker(task: string, args: Record<string, string>) {
     return { stocks: codes.map((item) => syncOne(item)) };
   }
   return {};
+}
+
+function allowDemoData() {
+  return ["1", "true", "yes"].includes(String(process.env.DATA_ALLOW_DEMO || "").toLowerCase());
 }
 
 function syncOne(code: string) {
@@ -88,7 +99,13 @@ function fallbackBasic(code: string) {
   const known: Record<string, { name: string; industry: string; company_profile: string }> = {
     "600519": { name: "贵州茅台", industry: "白酒", company_profile: "主营贵州茅台酒及系列酒的生产与销售。" },
     "000001": { name: "平安银行", industry: "银行", company_profile: "全国性股份制商业银行，提供公司、零售和金融市场业务。" },
-    "300750": { name: "宁德时代", industry: "电池", company_profile: "主营动力电池和储能电池系统研发、生产和销售。" }
+    "300750": { name: "宁德时代", industry: "电池", company_profile: "主营动力电池和储能电池系统研发、生产和销售。" },
+    "688728": { name: "格科微", industry: "半导体", company_profile: "主营 CMOS 图像传感器和显示驱动芯片等集成电路产品。" },
+    "603501": { name: "韦尔股份", industry: "半导体", company_profile: "主营半导体设计、图像传感器和模拟芯片等业务。" },
+    "688213": { name: "思特威", industry: "半导体", company_profile: "主营高性能 CMOS 图像传感器芯片研发、设计和销售。" },
+    "688469": { name: "芯联集成", industry: "半导体", company_profile: "主营特色工艺晶圆代工及相关半导体制造服务。" },
+    "688649": { name: "盛美上海", industry: "半导体设备", company_profile: "主营半导体专用设备研发、生产和销售。" },
+    "688981": { name: "中芯国际", industry: "半导体", company_profile: "主营集成电路晶圆代工及配套服务。" }
   };
   const stock = known[code];
   return {
