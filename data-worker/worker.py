@@ -23,7 +23,43 @@ KNOWN_STOCKS: Dict[str, Dict[str, str]] = {
         "name": "宁德时代",
         "industry": "电池",
         "company_profile": "主营动力电池和储能电池系统研发、生产和销售。"
-    }
+    },
+    "600036": {"name": "招商银行", "industry": "银行", "company_profile": "全国性股份制商业银行。"},
+    "601318": {"name": "中国平安", "industry": "保险", "company_profile": "综合金融服务集团，覆盖保险、银行、资产管理等业务。"},
+    "000858": {"name": "五粮液", "industry": "白酒", "company_profile": "主营浓香型白酒生产与销售。"},
+    "002594": {"name": "比亚迪", "industry": "汽车", "company_profile": "主营新能源汽车、动力电池及相关电子业务。"},
+    "000333": {"name": "美的集团", "industry": "家电", "company_profile": "主营智能家电、楼宇科技、机器人与自动化等业务。"},
+    "600276": {"name": "恒瑞医药", "industry": "化学制药", "company_profile": "主营创新药和仿制药研发、生产与销售。"},
+    "601398": {"name": "工商银行", "industry": "银行", "company_profile": "大型商业银行，提供公司金融、个人金融和资金业务。"},
+    "601288": {"name": "农业银行", "industry": "银行", "company_profile": "大型商业银行，服务城乡金融和综合银行业务。"},
+    "601988": {"name": "中国银行", "industry": "银行", "company_profile": "大型商业银行，提供商业银行、投资银行和保险等服务。"},
+    "601328": {"name": "交通银行", "industry": "银行", "company_profile": "大型商业银行，提供公司、零售和金融市场业务。"},
+    "601166": {"name": "兴业银行", "industry": "银行", "company_profile": "全国性股份制商业银行。"},
+    "600000": {"name": "浦发银行", "industry": "银行", "company_profile": "全国性股份制商业银行。"},
+    "600030": {"name": "中信证券", "industry": "证券", "company_profile": "综合证券公司，提供投行、经纪、资管等业务。"},
+    "600900": {"name": "长江电力", "industry": "电力", "company_profile": "主营大型水电运营与管理。"},
+    "600887": {"name": "伊利股份", "industry": "乳制品", "company_profile": "主营乳制品生产与销售。"},
+    "601899": {"name": "紫金矿业", "industry": "贵金属", "company_profile": "主营金、铜等矿产资源勘查、开采和冶炼。"},
+    "600309": {"name": "万华化学", "industry": "化工", "company_profile": "主营聚氨酯、石化和精细化学品。"},
+    "601012": {"name": "隆基绿能", "industry": "光伏设备", "company_profile": "主营单晶硅片、电池组件和光伏解决方案。"},
+    "002475": {"name": "立讯精密", "industry": "消费电子", "company_profile": "主营连接器、精密组件和消费电子制造。"},
+    "002415": {"name": "海康威视", "industry": "计算机设备", "company_profile": "主营视频物联、安防和智能物联网产品。"},
+    "300059": {"name": "东方财富", "industry": "互联网金融", "company_profile": "主营互联网金融信息服务和证券业务。"},
+    "300760": {"name": "迈瑞医疗", "industry": "医疗器械", "company_profile": "主营医疗器械研发、制造与销售。"},
+    "000651": {"name": "格力电器", "industry": "家电", "company_profile": "主营空调和生活电器。"},
+    "601668": {"name": "中国建筑", "industry": "建筑工程", "company_profile": "主营房建、基建、地产开发和投资运营。"},
+    "600028": {"name": "中国石化", "industry": "石油石化", "company_profile": "主营石油天然气勘探开发、炼化和销售。"},
+    "601857": {"name": "中国石油", "industry": "石油石化", "company_profile": "主营油气勘探开发、炼化销售和天然气业务。"},
+    "601633": {"name": "长城汽车", "industry": "汽车", "company_profile": "主营整车及汽车零部件研发、生产和销售。"},
+    "000002": {"name": "万科A", "industry": "房地产开发", "company_profile": "主营房地产开发和物业服务。"},
+    "000725": {"name": "京东方A", "industry": "光学光电子", "company_profile": "主营显示器件、物联网创新和传感业务。"},
+    "002352": {"name": "顺丰控股", "industry": "物流", "company_profile": "主营快递物流、供应链和国际业务。"},
+    "600031": {"name": "三一重工", "industry": "工程机械", "company_profile": "主营工程机械研发、制造和销售。"},
+    "603288": {"name": "海天味业", "industry": "调味发酵品", "company_profile": "主营酱油、蚝油、调味酱等调味品。"},
+    "000063": {"name": "中兴通讯", "industry": "通信设备", "company_profile": "主营通信设备和解决方案。"},
+    "002230": {"name": "科大讯飞", "industry": "软件开发", "company_profile": "主营智能语音、人工智能产品和行业解决方案。"},
+    "300014": {"name": "亿纬锂能", "industry": "电池", "company_profile": "主营消费电池、动力电池和储能电池。"},
+    "000568": {"name": "泸州老窖", "industry": "白酒", "company_profile": "主营白酒生产与销售。"}
 }
 
 
@@ -64,6 +100,10 @@ def try_akshare():
 
 
 def fetch_stock_basic(code: str) -> Dict[str, Any]:
+    basic = fallback_basic(code)
+    if code in KNOWN_STOCKS:
+        return basic
+
     ak = try_akshare()
     if ak:
         try:
@@ -72,14 +112,24 @@ def fetch_stock_basic(code: str) -> Dict[str, Any]:
             return {
                 "code": code,
                 "market": detect_market(code),
-                "name": info.get("股票简称") or info.get("证券简称") or fallback_basic(code)["name"],
-                "industry": info.get("行业") or fallback_basic(code)["industry"],
-                "company_profile": info.get("主营业务") or fallback_basic(code)["company_profile"],
-                "listing_date": info.get("上市时间") or fallback_basic(code)["listing_date"]
+                "name": info.get("股票简称") or info.get("证券简称") or info.get("名称") or basic["name"],
+                "industry": info.get("行业") or info.get("所属行业") or basic["industry"],
+                "company_profile": info.get("主营业务") or info.get("经营范围") or basic["company_profile"],
+                "listing_date": info.get("上市时间") or info.get("上市日期") or basic["listing_date"]
             }
         except Exception:
             pass
-    return fallback_basic(code)
+
+        try:
+            code_name = ak.stock_info_a_code_name()
+            match = code_name[code_name["code"].astype(str).str.zfill(6) == code]
+            if not match.empty:
+                row = match.iloc[0]
+                basic["name"] = str(row.get("name") or row.get("名称") or basic["name"])
+        except Exception:
+            pass
+
+    return basic
 
 
 def fetch_daily_metrics(code: str) -> List[Dict[str, Any]]:

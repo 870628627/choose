@@ -158,6 +158,21 @@ app.post("/api/stocks", async (req, res, next) => {
   }
 });
 
+app.delete("/api/stocks/:code", (req, res, next) => {
+  try {
+    const stock = getStockByCode(req.params.code) as { id: number } | undefined;
+    if (!stock) {
+      res.status(404).json({ error: "Stock not found" });
+      return;
+    }
+
+    db.prepare("DELETE FROM stocks WHERE id = ?").run(stock.id);
+    res.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/stocks/:code", (req, res) => {
   const stock = getStockByCode(req.params.code) as Record<string, unknown> | undefined;
   if (!stock) {

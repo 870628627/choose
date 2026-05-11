@@ -17,6 +17,10 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify({ code })
     }),
+  deleteStock: (code: string) =>
+    request(`/api/stocks/${code}`, {
+      method: "DELETE"
+    }),
   getStock: (code: string) => request(`/api/stocks/${code}`),
   sync: (code?: string) =>
     request("/api/sync", {

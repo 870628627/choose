@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  AlertTriangle,
   BarChart3,
   BookOpenText,
   FileClock,
   Home,
   RefreshCw,
   Search,
-  ShieldAlert
+  ShieldAlert,
+  Trash2
 } from "lucide-react";
 import { api } from "./api";
 import type { StockDetail, StockListItem, SyncLog } from "./types";
@@ -73,7 +73,7 @@ export default function App() {
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-normal text-ink">家庭版 A 股研究小本</h1>
+            <h1 className="text-2xl font-semibold tracking-normal text-ink">A股研究</h1>
             <p className="text-sm text-slate-600">自动数据、研究评分、风险标签、家庭笔记和复盘</p>
           </div>
           <nav className="flex flex-wrap gap-2">
@@ -147,6 +147,18 @@ function HomeView({
     }
   };
 
+  const deleteStock = async (stock: StockListItem) => {
+    const confirmed = window.confirm(`确定删除 ${stock.code} ${stock.name} 吗？相关数据、笔记和复盘记录也会一起删除。`);
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      await api.deleteStock(stock.code);
+      await reload();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div>
       <div className="mb-5 flex flex-col gap-3 border-b border-line pb-5 md:flex-row md:items-end">
@@ -181,6 +193,7 @@ function HomeView({
               <th>PB</th>
               <th>研究评分</th>
               <th>风险标签</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -198,11 +211,20 @@ function HomeView({
                 <td>{formatNumber(stock.pb)}</td>
                 <td>{stock.total_score ?? "-"}</td>
                 <td><Tags tags={stock.risk_tags} /></td>
+                <td>
+                  <button
+                    onClick={() => deleteStock(stock)}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded border border-line bg-white text-slate-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                    title="删除"
+                  >
+                    <Trash2 size={16} />
+                  </button>
+                </td>
               </tr>
             ))}
             {!stocks.length && (
               <tr>
-                <td colSpan={8} className="text-center text-slate-500">先添加一只股票开始研究。</td>
+                <td colSpan={9} className="text-center text-slate-500">先添加一只股票开始研究。</td>
               </tr>
             )}
           </tbody>
