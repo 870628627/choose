@@ -127,7 +127,7 @@ python data-worker/worker.py sync_all --codes 600519,000001
 ### ECS 首次准备
 
 1. 创建 Ubuntu 22.04 / 24.04 ECS。
-2. 安全组开放 `22` 和 `80`，如需 HTTPS 后续再开放 `443`。
+2. 安全组开放 `22` 和 `8081`，如需 HTTPS 后续再开放 `443`。
 3. 安装 Docker：
 
 ```bash
@@ -154,7 +154,7 @@ docker compose up -d --build
 访问：
 
 ```text
-http://你的ECS公网IP
+http://你的ECS公网IP:8081
 ```
 
 SQLite 数据会持久化到：

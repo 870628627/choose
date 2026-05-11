@@ -29,4 +29,4 @@ services:
     depends_on:
       - server
     ports:
-      - "80:80"
+      - "8081:80"
