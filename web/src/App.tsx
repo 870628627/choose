@@ -74,7 +74,7 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal text-ink">A股研究</h1>
-            <p className="text-sm text-slate-600">自动数据、研究评分、风险标签、家庭笔记和复盘</p>
+            <p className="text-sm text-slate-600">自动数据、研究评分、风险标签和复盘</p>
           </div>
           <nav className="flex flex-wrap gap-2">
             {navItems.map((item) => {
