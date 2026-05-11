@@ -415,7 +415,7 @@ function CompareView({ stocks }: { stocks: StockListItem[] }) {
   }, [codes.join(",")]);
 
   const toggle = (code: string) => {
-    setCodes((current) => current.includes(code) ? current.filter((item) => item !== code) : [...current, code].slice(0, 3));
+    setCodes((current) => current.includes(code) ? current.filter((item) => item !== code) : [...current, code].slice(0, 4));
   };
 
   return (

@@ -230,7 +230,7 @@ app.get("/api/compare", (req, res) => {
     .split(",")
     .map((code) => code.trim())
     .filter(Boolean)
-    .slice(0, 3);
+    .slice(0, 4);
 
   const rows = codes.map((code) => {
     const stock = getStockByCode(code) as Record<string, unknown> | undefined;
