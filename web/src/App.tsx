@@ -246,8 +246,6 @@ function DetailView({
   reloadStocks: () => Promise<void>;
 }) {
   const [detail, setDetail] = useState<StockDetail | null>(null);
-  const [author, setAuthor] = useState("我");
-  const [content, setContent] = useState("");
 
   const loadDetail = async () => {
     if (!selectedCode) return;
@@ -257,13 +255,6 @@ function DetailView({
   useEffect(() => {
     loadDetail().catch(() => setDetail(null));
   }, [selectedCode]);
-
-  const addNote = async () => {
-    if (!selectedCode || !content.trim()) return;
-    await api.addNote(selectedCode, author, content);
-    setContent("");
-    await loadDetail();
-  };
 
   const syncOne = async () => {
     if (!selectedCode) return;
@@ -355,26 +346,6 @@ function DetailView({
             </div>
           </Section>
 
-          <Section title="我和爸爸的笔记">
-            <div className="grid gap-4 md:grid-cols-3">
-              <div className="rounded border border-line bg-white p-4">
-                <select value={author} onChange={(event) => setAuthor(event.target.value)} className="mb-3 w-full rounded border border-line px-3 py-2">
-                  <option value="我">我</option>
-                  <option value="爸爸">爸爸</option>
-                </select>
-                <textarea value={content} onChange={(event) => setContent(event.target.value)} rows={5} className="w-full rounded border border-line px-3 py-2" />
-                <button onClick={addNote} className="mt-3 rounded border border-accent bg-accent px-4 py-2 text-white">保存笔记</button>
-              </div>
-              <div className="md:col-span-2">
-                {detail.notes.map((note) => (
-                  <div key={note.id} className="mb-3 rounded border border-line bg-white p-4">
-                    <div className="mb-1 text-sm text-slate-500">{note.author} ｜ {note.created_at}</div>
-                    <p className="whitespace-pre-wrap">{note.content}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Section>
         </>
       )}
     </div>
