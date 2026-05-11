@@ -1,10 +1,21 @@
-FROM node:22
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates \
+  && apt-get install -y --no-install-recommends python3 python3-pip python3-venv ca-certificates curl xz-utils \
   && rm -rf /var/lib/apt/lists/*
+
+ARG NODE_VERSION=22.22.0
+RUN curl -fsSL "https://npmmirror.com/mirrors/node/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.xz" -o /tmp/node.tar.xz \
+  && mkdir -p /usr/local/lib/nodejs \
+  && tar -xJf /tmp/node.tar.xz -C /usr/local/lib/nodejs \
+  && ln -s /usr/local/lib/nodejs/node-v${NODE_VERSION}-linux-x64/bin/node /usr/local/bin/node \
+  && ln -s /usr/local/lib/nodejs/node-v${NODE_VERSION}-linux-x64/bin/npm /usr/local/bin/npm \
+  && ln -s /usr/local/lib/nodejs/node-v${NODE_VERSION}-linux-x64/bin/npx /usr/local/bin/npx \
+  && rm /tmp/node.tar.xz \
+  && node --version \
+  && npm --version
 
 COPY data-worker/requirements.txt /app/data-worker/requirements.txt
 RUN python3 -m venv /opt/venv \
