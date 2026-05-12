@@ -410,6 +410,33 @@ def ensure_tradingagents_credentials(provider: str):
         raise SystemExit(f"TradingAgents 后端缺少模型密钥。请在启动 choose 后端前设置 {joined}，或写入 server/.env。")
 
 
+def summarize_exception_chain(error: BaseException) -> str:
+    parts = []
+    current: Optional[BaseException] = error
+    while current and len(parts) < 8:
+        detail = str(current).strip()
+        parts.append(f"{current.__class__.__name__}{f': {detail}' if detail else ''}")
+        current = current.__cause__ or current.__context__
+    return " | ".join(parts)
+
+
+def is_model_network_error(error: BaseException) -> bool:
+    text = summarize_exception_chain(error).lower()
+    tokens = [
+        "apiconnectionerror",
+        "connecterror",
+        "connection error",
+        "network is unreachable",
+        "connection refused",
+        "proxyerror",
+        "timed out",
+        "timeout",
+        "temporary failure in name resolution",
+        "name or service not known"
+    ]
+    return any(token in text for token in tokens)
+
+
 def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dict[str, Any]:
     import contextlib
 
@@ -443,8 +470,21 @@ def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dic
     # Keep stdout as clean JSON for the Node caller; TradingAgents traces and
     # provider warnings are routed to stderr.
     with contextlib.redirect_stdout(sys.stderr):
-        graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
-        final_state, decision = graph.propagate(symbol, report_date)
+        try:
+            graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
+            final_state, decision = graph.propagate(symbol, report_date)
+        except Exception as error:
+            if is_model_network_error(error):
+                provider = str(config.get("llm_provider", "openai"))
+                backend_url = config.get("backend_url") or "默认模型接口"
+                detail = summarize_exception_chain(error)
+                raise SystemExit(
+                    f"TradingAgents 无法连接模型服务（provider={provider}, backend_url={backend_url}）。"
+                    "当前 server 容器网络不可达或模型接口被阻断；请检查 ECS 出站网络、代理，"
+                    "或设置 TRADINGAGENTS_LLM_BACKEND_URL 指向服务器可访问的 OpenAI 兼容网关。"
+                    f"原始错误：{detail}"
+                )
+            raise
 
     investment_state = final_state.get("investment_debate_state", {})
     risk_state = final_state.get("risk_debate_state", {})
