@@ -5,6 +5,7 @@ import pandas as pd
 import yfinance as yf
 import os
 from .a_share_data import format_akshare_stock_data, is_a_share_symbol
+from .market_fallback_data import format_fallback_stock_data, has_market_fallback
 from .stockstats_utils import StockstatsUtils, _clean_dataframe, yf_retry, load_ohlcv, filter_financials_by_date
 
 def get_YFin_data_online(
@@ -22,11 +23,28 @@ def get_YFin_data_online(
         except Exception as e:
             return f"Error retrieving A-share stock data for {symbol}: {str(e)}"
 
+    if has_market_fallback(symbol):
+        try:
+            return format_fallback_stock_data(symbol, start_date, end_date)
+        except Exception as fallback_error:
+            print(f"Fallback market data failed for {symbol}: {fallback_error}")
+
     # Create ticker object
     ticker = yf.Ticker(symbol.upper())
 
     # Fetch historical data for the specified date range
-    data = yf_retry(lambda: ticker.history(start=start_date, end=end_date))
+    try:
+        data = yf_retry(lambda: ticker.history(start=start_date, end=end_date))
+    except Exception as error:
+        if has_market_fallback(symbol):
+            try:
+                return format_fallback_stock_data(symbol, start_date, end_date)
+            except Exception as fallback_error:
+                return (
+                    f"Error retrieving market data for {symbol}: Yahoo Finance failed with {error}; "
+                    f"fallback source failed with {fallback_error}"
+                )
+        return f"Error retrieving Yahoo Finance stock data for {symbol}: {error}"
 
     # Check if data is empty
     if data.empty:
@@ -172,8 +190,8 @@ def get_stock_stats_indicators_window(
         
     except Exception as e:
         print(f"Error getting bulk stockstats data: {e}")
-        if is_a_share_symbol(symbol):
-            ind_string = f"Unable to retrieve A-share OHLCV data for {symbol}: {e}\n"
+        if is_a_share_symbol(symbol) or has_market_fallback(symbol):
+            ind_string = f"Unable to retrieve OHLCV data for {symbol}: {e}\n"
             result_str = (
                 f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {end_date}:\n\n"
                 + ind_string
