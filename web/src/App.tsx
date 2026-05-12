@@ -117,7 +117,7 @@ export default function App() {
       </main>
 
       <footer className="fixed inset-x-0 bottom-0 border-t border-line bg-white px-4 py-3 text-center text-sm text-slate-700">
-        本工具仅用于家庭自用的股票信息整理、研究对比和复盘，不构成任何投资建议。股市有风险，投资需谨慎。
+        本工具可生成股票研究、交易观点、目标价和涨跌判断。模型结论可能错误或滞后，实际交易请自行确认数据并控制风险。
       </footer>
     </div>
   );
@@ -306,7 +306,7 @@ function DetailView({
           className="inline-flex items-center gap-2 rounded border border-accent bg-accent px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           <Sparkles size={16} />
-          {agentLoading ? "生成中文研究报告中" : "生成 TradingAgents 中文报告"}
+          {agentLoading ? "生成中文交易报告中" : "生成 TradingAgents 中文交易报告"}
         </button>
       </div>
 
@@ -341,11 +341,11 @@ function DetailView({
             </div>
           </Section>
 
-          <Section title="TradingAgents 中文研究报告">
+          <Section title="TradingAgents 中文交易报告">
             <div className="rounded border border-line bg-white p-4">
               {!agentReport && !agentLoading && !agentError && (
                 <p className="text-sm leading-6 text-slate-600">
-                  点击上方按钮后，系统会调用 TradingAgents 生成中文研究材料。报告仅用于家庭自用研究、信息整理和复盘。
+                  点击上方按钮后，系统会调用 TradingAgents 生成中文交易报告，包括行情、新闻、基本面、多空辩论、交易员方案和最终决策。
                 </p>
               )}
               {agentLoading && (
@@ -374,7 +374,7 @@ function DetailView({
                     ) : null
                   ))}
                   <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
-                    {agentReport.compliance_notice}
+                    {agentReport.risk_notice}
                   </div>
                 </div>
               )}
@@ -443,10 +443,15 @@ function aiTitle(key: string) {
 function agentSectionTitle(key: string) {
   const map: Record<string, string> = {
     market_report: "行情与技术面",
+    sentiment_report: "市场情绪",
     news_report: "新闻与公告线索",
     fundamentals_report: "基本面研究",
-    research_plan: "研究经理摘要",
-    risk_review: "风险审查"
+    investment_debate: "多空辩论",
+    research_plan: "研究经理交易摘要",
+    trader_plan: "交易员方案",
+    risk_debate: "风险团队辩论",
+    risk_review: "风险经理结论",
+    final_trade_decision: "最终交易决策"
   };
   return map[key] || key;
 }

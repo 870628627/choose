@@ -66,10 +66,15 @@ export type TradingAgentsReport = {
   decision_signal?: unknown;
   sections: {
     market_report?: string;
+    sentiment_report?: string;
     news_report?: string;
     fundamentals_report?: string;
+    investment_debate?: string;
     research_plan?: string;
+    trader_plan?: string;
+    risk_debate?: string;
     risk_review?: string;
+    final_trade_decision?: string;
   };
-  compliance_notice: string;
+  risk_notice: string;
 };

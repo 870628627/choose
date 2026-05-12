@@ -434,7 +434,7 @@ def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dic
 
     analysts = [
         item.strip()
-        for item in os.getenv("TRADINGAGENTS_WEB_ANALYSTS", "market,news,fundamentals").split(",")
+        for item in os.getenv("TRADINGAGENTS_WEB_ANALYSTS", "market,social,news,fundamentals").split(",")
         if item.strip()
     ]
     symbol = yahoo_a_share_symbol(code)
@@ -446,6 +446,7 @@ def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dic
         graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
         final_state, decision = graph.propagate(symbol, report_date)
 
+    investment_state = final_state.get("investment_debate_state", {})
     risk_state = final_state.get("risk_debate_state", {})
     return {
         "code": code,
@@ -455,12 +456,17 @@ def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dic
         "decision_signal": decision,
         "sections": {
             "market_report": final_state.get("market_report", ""),
+            "sentiment_report": final_state.get("sentiment_report", ""),
             "news_report": final_state.get("news_report", ""),
             "fundamentals_report": final_state.get("fundamentals_report", ""),
+            "investment_debate": investment_state.get("history", ""),
             "research_plan": final_state.get("investment_plan", ""),
-            "risk_review": risk_state.get("judge_decision", "")
+            "trader_plan": final_state.get("trader_investment_plan", ""),
+            "risk_debate": risk_state.get("history", ""),
+            "risk_review": risk_state.get("judge_decision", ""),
+            "final_trade_decision": final_state.get("final_trade_decision", "")
         },
-        "compliance_notice": "本报告仅用于家庭自用研究、信息整理和复盘，不构成任何投资建议，不提供目标价、涨跌预测或自动交易指令。"
+        "risk_notice": "本报告可以包含荐股观点、交易方案、目标价或涨跌判断；所有结论均由模型基于可得数据生成，可能错误或滞后。实际交易请自行确认数据、控制仓位并承担风险。"
     }
 
 
