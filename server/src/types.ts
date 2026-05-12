@@ -49,15 +49,6 @@ export type WorkerStockPayload = {
   announcements: WorkerAnnouncement[];
 };
 
-export type AiReport = {
-  one_sentence: string;
-  financial_explanation: string;
-  valuation_explanation: string;
-  risk_explanation: string;
-  peer_comparison: string;
-  dad_version: string;
-};
-
 export type TradingAgentsReport = {
   code: string;
   symbol: string;

@@ -2,9 +2,16 @@ const jsonHeaders = { "Content-Type": "application/json" };
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
-  const payload = await response.json().catch(() => ({}));
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.includes("application/json")
+    ? await response.json().catch(() => ({}))
+    : {};
+  const fallbackText = response.ok || contentType.includes("application/json")
+    ? ""
+    : await response.text().catch(() => "");
   if (!response.ok) {
-    throw new Error(payload.error || "请求失败");
+    const payloadError = typeof payload === "object" && payload && "error" in payload ? String(payload.error) : "";
+    throw new Error(payloadError || fallbackText.slice(0, 200) || `请求失败（HTTP ${response.status}）`);
   }
   return payload as T;
 }

@@ -1,6 +1,6 @@
 # 家庭版 A 股研究小本自动数据版
 
-一个家庭自用的 A 股研究、对比和复盘 MVP。输入股票代码后，系统自动保存基础信息、日频估值行情、财务指标、公告标题，并生成研究评分、风险标签和模拟 AI 解释。
+一个家庭自用的 A 股研究、对比和复盘 MVP。输入股票代码后，系统自动保存基础信息、日频估值行情、财务指标、公告标题，并生成研究评分和风险标签。
 
 本项目允许生成荐股观点、交易方案、目标价和涨跌判断，并在网页端接入 TradingAgents 中文交易报告。
 
@@ -9,7 +9,7 @@
 - 前端：React + Vite + TypeScript + Tailwind CSS
 - 后端：Node.js + Express + SQLite
 - 数据采集：Python data-worker，优先 AKShare，失败时回退演示数据
-- AI：MVP 使用模拟 AI 分析，预留 OpenAI / DeepSeek 配置
+- LLM：网页端接入 TradingAgents 中文交易报告，支持 OpenAI / DeepSeek 等模型配置
 
 ## 目录
 
@@ -60,7 +60,7 @@ copy .env.example server\.env
 - `DATA_WORKER_PYTHON`：Python 命令，默认 `python`
 - `DATA_WORKER_PATH`：data-worker 脚本路径
 - `TUSHARE_TOKEN`：预留 Tushare token
-- `AI_PROVIDER`、`OPENAI_API_KEY`、`DEEPSEEK_API_KEY`：预留 AI 服务配置
+- `OPENAI_API_KEY`、`DEEPSEEK_API_KEY`：TradingAgents 模型密钥配置
 
 ## 启动
 
@@ -85,7 +85,7 @@ set VITE_API_PROXY_TARGET=http://localhost:3101 && npm run dev --prefix web
 
 1. 在首页输入 `600519`、`000001` 或 `300750` 添加股票。
 2. 到“同步管理”点击“同步全部自选股”。
-3. 打开股票详情页查看自动数据、研究评分、风险标签、AI 解释和家庭笔记。
+3. 打开股票详情页查看自动数据、研究评分、风险标签，并生成或导出 TradingAgents 中文交易报告。
 4. 到“股票对比”选择 2-4 只股票横向对比。
 5. 到“风险排雷”查看所有股票风险标签。
 6. 到“复盘”记录当时判断和后续结果。

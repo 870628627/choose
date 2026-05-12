@@ -4,13 +4,14 @@ import express from "express";
 import { z } from "zod";
 import { db, getStockByCode, listStocks } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
-import { buildMockAiReport } from "./ai.js";
 import { createResearchScore } from "./scoring.js";
 import type { TradingAgentsReport, WorkerStockBasic, WorkerStockPayload } from "./types.js";
 import type { WorkerAnnouncement, WorkerDailyMetric, WorkerFinancialMetric } from "./types.js";
 
 const app = express();
 const port = Number(process.env.PORT || 3001);
+const requestTimeoutMs = Number(process.env.SERVER_REQUEST_TIMEOUT_MS || 900000);
+const socketTimeoutMs = Number(process.env.SERVER_SOCKET_TIMEOUT_MS || 0);
 
 app.use(cors());
 app.use(express.json());
@@ -197,7 +198,6 @@ app.get("/api/stocks/:code", (req, res) => {
     .get(stockId) as Record<string, unknown> | undefined;
   const notes = db.prepare("SELECT * FROM family_notes WHERE stock_id = ? ORDER BY created_at DESC").all(stockId);
   const reviews = db.prepare("SELECT * FROM review_records WHERE stock_id = ? ORDER BY review_date DESC").all(stockId);
-  const ai_report = buildMockAiReport(stockId);
 
   res.json({
     stock,
@@ -206,8 +206,7 @@ app.get("/api/stocks/:code", (req, res) => {
     announcements,
     score: score ? withParsedRiskTags(score) : null,
     notes,
-    reviews,
-    ai_report
+    reviews
   });
 });
 
@@ -434,6 +433,9 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
   res.status(400).json({ error: message || "Unknown error" });
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`family A-share server listening on http://localhost:${port}`);
 });
+
+server.requestTimeout = requestTimeoutMs;
+server.timeout = socketTimeoutMs;

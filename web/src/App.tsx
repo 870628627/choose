@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BarChart3,
   BookOpenText,
+  Download,
   FileClock,
   Home,
   RefreshCw,
@@ -29,6 +30,22 @@ function formatNumber(value: unknown, digits = 2) {
   const number = Number(value);
   if (Number.isNaN(number)) return String(value);
   return number.toFixed(digits);
+}
+
+function safeFileName(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "").slice(0, 80) || "report";
+}
+
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function Tags({ tags }: { tags?: string[] }) {
@@ -282,6 +299,12 @@ function DetailView({
     }
   };
 
+  const exportTradingAgentsReport = () => {
+    if (!agentReport || !detail) return;
+    const name = `${safeFileName(agentReport.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(agentReport.trade_date)}.md`;
+    downloadTextFile(name, buildTradingAgentsMarkdown(agentReport, detail.stock.name));
+  };
+
   if (!stocks.length) return <p className="text-slate-600">请先在首页添加股票。</p>;
 
   return (
@@ -330,17 +353,6 @@ function DetailView({
             </div>
           </div>
 
-          <Section title="模拟 AI 解释">
-            <div className="grid gap-3 md:grid-cols-2">
-              {Object.entries(detail.ai_report).map(([key, value]) => (
-                <div key={key} className="rounded border border-line bg-white p-4 text-sm leading-6">
-                  <div className="mb-1 font-semibold text-slate-700">{aiTitle(key)}</div>
-                  <p>{value}</p>
-                </div>
-              ))}
-            </div>
-          </Section>
-
           <Section title="TradingAgents 中文交易报告">
             <div className="rounded border border-line bg-white p-4">
               {!agentReport && !agentLoading && !agentError && (
@@ -360,10 +372,20 @@ function DetailView({
               )}
               {agentReport && (
                 <div className="space-y-4">
-                  <div className="flex flex-wrap gap-3 text-sm text-slate-600">
-                    <span>代码：{agentReport.code}</span>
-                    <span>行情符号：{agentReport.symbol}</span>
-                    <span>分析日期：{agentReport.trade_date}</span>
+                  <div className="flex flex-col gap-3 border-b border-line pb-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+                      <span>代码：{agentReport.code}</span>
+                      <span>行情符号：{agentReport.symbol}</span>
+                      <span>分析日期：{agentReport.trade_date}</span>
+                    </div>
+                    <button
+                      onClick={exportTradingAgentsReport}
+                      className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
+                      title="导出报告"
+                    >
+                      <Download size={16} />
+                      导出报告
+                    </button>
                   </div>
                   {Object.entries(agentReport.sections).map(([key, value]) => (
                     value ? (
@@ -428,18 +450,6 @@ function Metric({ label, value }: { label: string; value: unknown }) {
   );
 }
 
-function aiTitle(key: string) {
-  const map: Record<string, string> = {
-    one_sentence: "公司一句话介绍",
-    financial_explanation: "财务表现解释",
-    valuation_explanation: "估值高低解释",
-    risk_explanation: "主要风险解释",
-    peer_comparison: "同行对比解释",
-    dad_version: "爸爸版通俗解释"
-  };
-  return map[key] || key;
-}
-
 function agentSectionTitle(key: string) {
   const map: Record<string, string> = {
     market_report: "行情与技术面",
@@ -454,6 +464,26 @@ function agentSectionTitle(key: string) {
     final_trade_decision: "最终交易决策"
   };
   return map[key] || key;
+}
+
+function buildTradingAgentsMarkdown(report: TradingAgentsReport, stockName?: string) {
+  const title = `${stockName ? `${stockName} ` : ""}${report.code} TradingAgents 中文交易报告`;
+  const lines = [
+    `# ${title}`,
+    "",
+    `- 代码：${report.code}`,
+    `- 行情符号：${report.symbol}`,
+    `- 分析日期：${report.trade_date}`,
+    ""
+  ];
+
+  Object.entries(report.sections).forEach(([key, value]) => {
+    if (!value) return;
+    lines.push(`## ${agentSectionTitle(key)}`, "", String(value).trim(), "");
+  });
+
+  lines.push("## 风险提示", "", report.risk_notice);
+  return `${lines.join("\n")}\n`;
 }
 
 function CompareView({ stocks }: { stocks: StockListItem[] }) {

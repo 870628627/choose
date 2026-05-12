@@ -22,14 +22,6 @@ export type StockDetail = {
   score: (Record<string, number | string | string[] | null> & { risk_tags: string[] }) | null;
   notes: Array<{ id: number; author: string; content: string; created_at: string }>;
   reviews: Array<Record<string, number | string | null>>;
-  ai_report: {
-    one_sentence: string;
-    financial_explanation: string;
-    valuation_explanation: string;
-    risk_explanation: string;
-    peer_comparison: string;
-    dad_version: string;
-  };
 };
 
 export type TradingAgentsReport = {
