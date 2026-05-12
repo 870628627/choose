@@ -1,2 +1,3 @@
 akshare>=1.14.0
 pandas>=2.0.0
+git+https://github.com/870628627/TradingAgents.git@a5cb7cbd61d217fb0bc43f017392a861257afe6a#egg=tradingagents
