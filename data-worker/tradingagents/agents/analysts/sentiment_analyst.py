@@ -27,6 +27,8 @@ from tradingagents.agents.utils.agent_utils import (
     get_language_instruction,
     get_news,
 )
+from tradingagents.dataflows.a_share_data import is_a_share_symbol
+from tradingagents.dataflows.a_share_sentiment import fetch_eastmoney_guba_posts
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
@@ -53,17 +55,27 @@ def create_sentiment_analyst(llm):
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        if is_a_share_symbol(ticker):
+            guba_block = fetch_eastmoney_guba_posts(ticker, limit=30)
+            system_message = _build_a_share_system_message(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                news_block=news_block,
+                guba_block=guba_block,
+            )
+        else:
+            stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
+            reddit_block = fetch_reddit_posts(ticker)
 
-        system_message = _build_system_message(
-            ticker=ticker,
-            start_date=start_date,
-            end_date=end_date,
-            news_block=news_block,
-            stocktwits_block=stocktwits_block,
-            reddit_block=reddit_block,
-        )
+            system_message = _build_system_message(
+                ticker=ticker,
+                start_date=start_date,
+                end_date=end_date,
+                news_block=news_block,
+                stocktwits_block=stocktwits_block,
+                reddit_block=reddit_block,
+            )
 
         prompt = ChatPromptTemplate.from_messages(
             [
@@ -158,6 +170,52 @@ Produce a sentiment report covering, in order:
 3. **Divergences, alignments, and key narratives** across sources.
 4. **Catalysts and risks** surfaced by the data.
 5. **Markdown table** at the end summarizing key sentiment signals, their direction, source, and supporting evidence.
+
+{get_language_instruction()}"""
+
+
+def _build_a_share_system_message(
+    *,
+    ticker: str,
+    start_date: str,
+    end_date: str,
+    news_block: str,
+    guba_block: str,
+) -> str:
+    return f"""You are an A-share market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}.
+
+## Data sources (pre-fetched, in this prompt)
+
+### A-share discussion — Eastmoney Guba
+Retail-investor discussion source. Treat it as noisy, fast-moving public-market opinion. Do not invent X, Reddit, or StockTwits evidence for A shares.
+
+<start_of_eastmoney_guba>
+{guba_block}
+<end_of_eastmoney_guba>
+
+### News headlines — configured news vendor
+Use this block only when it contains real ticker-relevant headlines. If it is unavailable or sparse, say so clearly.
+
+<start_of_news>
+{news_block}
+<end_of_news>
+
+## How to analyze this data
+
+1. Separate event facts from retail opinion.
+2. Weight discussion by visible engagement and repeated themes, not by a single post.
+3. Call out data gaps explicitly. If Eastmoney Guba or news data is unavailable, say the sentiment confidence is low.
+4. Do not claim that public discussion predicts price. Frame it as one input beside technicals and fundamentals.
+
+## Output
+
+Produce a sentiment report covering:
+
+1. Overall sentiment direction — Bullish / Bearish / Neutral / Mixed — with confidence based on source quality.
+2. Eastmoney Guba themes and notable repeated narratives.
+3. News/event themes when available.
+4. Divergences, catalysts, and risks.
+5. A markdown table summarizing signals, direction, source, and evidence.
 
 {get_language_instruction()}"""
 

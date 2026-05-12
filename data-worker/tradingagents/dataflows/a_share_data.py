@@ -1,5 +1,6 @@
-import os
+from contextlib import redirect_stdout
 from datetime import datetime
+from io import StringIO
 from typing import Optional
 
 import pandas as pd
@@ -37,6 +38,65 @@ def _column(frame: pd.DataFrame, candidates: list[str]) -> str:
 def _eastmoney_secid(code: str) -> str:
     market = "1" if code.startswith("6") else "0"
     return f"{market}.{code}"
+
+
+def _baostock_symbol(code: str) -> str:
+    return f"sh.{code}" if code.startswith("6") else f"sz.{code}"
+
+
+def _normalize_ohlcv(data: pd.DataFrame) -> pd.DataFrame:
+    if data.empty:
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
+    for column in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data = data.dropna(subset=["Date", "Close"]).sort_values("Date")
+    return data[["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]].reset_index(drop=True)
+
+
+def get_baostock_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+
+    import baostock as bs  # type: ignore
+
+    with redirect_stdout(StringIO()):
+        login_result = bs.login()
+    try:
+        if getattr(login_result, "error_code", "0") != "0":
+            raise RuntimeError(getattr(login_result, "error_msg", "baostock login failed"))
+        fields = "date,open,high,low,close,volume"
+        result = bs.query_history_k_data_plus(
+            _baostock_symbol(code),
+            fields,
+            start_date=start_date,
+            end_date=end_date,
+            frequency="d",
+            adjustflag="3",
+        )
+        if result.error_code != "0":
+            raise RuntimeError(result.error_msg)
+        rows = []
+        while result.next():
+            rows.append(result.get_row_data())
+        if not rows:
+            return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+        raw = pd.DataFrame(rows, columns=result.fields)
+    finally:
+        with redirect_stdout(StringIO()):
+            bs.logout()
+
+    data = pd.DataFrame({
+        "Date": raw["date"],
+        "Open": raw["open"],
+        "High": raw["high"],
+        "Low": raw["low"],
+        "Close": raw["close"],
+        "Adj Close": raw["close"],
+        "Volume": raw["volume"],
+    })
+    return _normalize_ohlcv(data)
 
 
 def get_eastmoney_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
@@ -80,11 +140,7 @@ def get_eastmoney_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataF
 
     data = pd.DataFrame(rows)
     data["Adj Close"] = data["Close"]
-    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
-    for column in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
-        data[column] = pd.to_numeric(data[column], errors="coerce")
-    data = data.dropna(subset=["Date", "Close"]).sort_values("Date")
-    return data[["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]].reset_index(drop=True)
+    return _normalize_ohlcv(data)
 
 
 def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
@@ -92,19 +148,29 @@ def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFra
     if not code:
         raise ValueError(f"{symbol} is not an A-share symbol")
 
-    data = get_eastmoney_ohlcv(symbol, start_date, end_date)
-    if not data.empty or not os.getenv("TRADINGAGENTS_A_SHARE_AKSHARE_FALLBACK"):
-        return data
+    for loader in (get_baostock_ohlcv, get_eastmoney_ohlcv):
+        try:
+            data = loader(symbol, start_date, end_date)
+            if not data.empty:
+                return data
+        except Exception:
+            pass
 
-    import akshare as ak  # type: ignore
+    try:
+        import akshare as ak  # type: ignore
+    except Exception:
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
 
-    raw = ak.stock_zh_a_hist(
-        symbol=code,
-        period="daily",
-        start_date=start_date.replace("-", ""),
-        end_date=end_date.replace("-", ""),
-        adjust=""
-    )
+    try:
+        raw = ak.stock_zh_a_hist(
+            symbol=code,
+            period="daily",
+            start_date=start_date.replace("-", ""),
+            end_date=end_date.replace("-", ""),
+            adjust=""
+        )
+    except Exception:
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
     if raw is None or raw.empty:
         return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
 
@@ -124,11 +190,7 @@ def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFra
         "Adj Close": raw[close_col],
         "Volume": raw[volume_col],
     })
-    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
-    for column in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
-        data[column] = pd.to_numeric(data[column], errors="coerce")
-    data = data.dropna(subset=["Date", "Close"]).sort_values("Date")
-    return data.reset_index(drop=True)
+    return _normalize_ohlcv(data)
 
 
 def format_akshare_stock_data(symbol: str, start_date: str, end_date: str) -> str:
@@ -143,7 +205,7 @@ def format_akshare_stock_data(symbol: str, start_date: str, end_date: str) -> st
     output = output.set_index("Date")
 
     header = f"# A-share stock data for {symbol.upper()} from {start_date} to {end_date}\n"
-    header += f"# Source: Eastmoney A-share kline, with optional AKShare fallback\n"
+    header += f"# Source priority: BaoStock daily k-line, then Eastmoney, then AKShare\n"
     header += f"# Total records: {len(output)}\n"
     header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 

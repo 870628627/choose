@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import { z } from "zod";
 import { bearerToken, createSession, createUser, requireAuth, revokeSession, verifyUser } from "./auth.js";
-import { db, getStockByCode, listStocks } from "./db.js";
+import { addUserStock, db, getStockByCode, getUserStockByCode, listStocks, listUserStockCodes, removeUserStock } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
 import { createResearchScore } from "./scoring.js";
 import type { AuthenticatedRequest } from "./auth.js";
@@ -279,38 +279,43 @@ app.delete("/api/reports/:id", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
-app.get("/api/stocks", (_req, res) => {
-  res.json(listStocks().map((item) => withParsedRiskTags(item as Record<string, unknown>)));
+app.get("/api/stocks", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  res.json(listStocks(user.id).map((item) => withParsedRiskTags(item as Record<string, unknown>)));
 });
 
-app.post("/api/stocks", async (req, res, next) => {
+app.post("/api/stocks", requireAuth, async (req, res, next) => {
   try {
+    const user = (req as AuthenticatedRequest).user;
     const { code } = addStockSchema.parse(req.body);
     const basic = await runDataWorker<WorkerStockBasic>("fetch_stock_basic", { code });
     const stock = upsertStock(basic);
+    addUserStock(user.id, stock.id);
     res.status(201).json(stock);
   } catch (error) {
     next(error);
   }
 });
 
-app.delete("/api/stocks/:code", (req, res, next) => {
+app.delete("/api/stocks/:code", requireAuth, (req, res, next) => {
   try {
-    const stock = getStockByCode(req.params.code) as { id: number } | undefined;
+    const user = (req as AuthenticatedRequest).user;
+    const stock = getUserStockByCode(user.id, req.params.code) as { id: number } | undefined;
     if (!stock) {
       res.status(404).json({ error: "Stock not found" });
       return;
     }
 
-    db.prepare("DELETE FROM stocks WHERE id = ?").run(stock.id);
+    removeUserStock(user.id, stock.id);
     res.json({ ok: true });
   } catch (error) {
     next(error);
   }
 });
 
-app.get("/api/stocks/:code", (req, res) => {
-  const stock = getStockByCode(req.params.code) as Record<string, unknown> | undefined;
+app.get("/api/stocks/:code", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  const stock = getUserStockByCode(user.id, req.params.code) as Record<string, unknown> | undefined;
   if (!stock) {
     res.status(404).json({ error: "Stock not found" });
     return;
@@ -342,9 +347,10 @@ app.get("/api/stocks/:code", (req, res) => {
   });
 });
 
-app.post("/api/stocks/:code/notes", (req, res, next) => {
+app.post("/api/stocks/:code/notes", requireAuth, (req, res, next) => {
   try {
-    const stock = getStockByCode(req.params.code) as { id: number } | undefined;
+    const user = (req as AuthenticatedRequest).user;
+    const stock = getUserStockByCode(user.id, req.params.code) as { id: number } | undefined;
     if (!stock) {
       res.status(404).json({ error: "Stock not found" });
       return;
@@ -362,7 +368,7 @@ app.post("/api/stocks/:code/notes", (req, res, next) => {
 app.post("/api/stocks/:code/tradingagents-report", requireAuth, async (req, res, next) => {
   try {
     const user = (req as AuthenticatedRequest).user;
-    const stock = getStockByCode(req.params.code) as { id: number; code: string; name?: string } | undefined;
+    const stock = getUserStockByCode(user.id, req.params.code) as { id: number; code: string; name?: string } | undefined;
     if (!stock) {
       res.status(404).json({ error: "Stock not found" });
       return;
@@ -543,17 +549,20 @@ app.get("/api/data-quality", (_req, res) => {
   );
 });
 
-app.post("/api/sync", async (req, res, next) => {
+app.post("/api/sync", requireAuth, async (req, res, next) => {
+  const user = (req as AuthenticatedRequest).user;
   const startedAt = new Date().toISOString();
   const targetCode = typeof req.body?.code === "string" ? req.body.code : null;
   const syncType = targetCode ? "sync_one" : "sync_all";
 
   try {
-    const codes = targetCode
-      ? [targetCode]
-      : (listStocks() as Array<{ code: string }>).map((stock) => stock.code);
+    const codes = targetCode ? [targetCode] : listUserStockCodes(user.id).map((stock) => stock.code);
     if (!codes.length) {
       res.json({ synced: 0, message: "暂无自选股票" });
+      return;
+    }
+    if (targetCode && !getUserStockByCode(user.id, targetCode)) {
+      res.status(404).json({ error: "Stock not found" });
       return;
     }
 

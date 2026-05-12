@@ -5,7 +5,7 @@ import pandas as pd
 import yfinance as yf
 import os
 from .a_share_data import format_akshare_stock_data, is_a_share_symbol
-from .market_fallback_data import format_fallback_stock_data, has_market_fallback
+from .market_fallback_data import format_fallback_stock_data, has_market_fallback, is_crypto_symbol
 from .stockstats_utils import StockstatsUtils, _clean_dataframe, yf_retry, load_ohlcv, filter_financials_by_date
 
 def get_YFin_data_online(
@@ -23,7 +23,7 @@ def get_YFin_data_online(
         except Exception as e:
             return f"Error retrieving A-share stock data for {symbol}: {str(e)}"
 
-    if has_market_fallback(symbol):
+    if is_crypto_symbol(symbol):
         try:
             return format_fallback_stock_data(symbol, start_date, end_date)
         except Exception as fallback_error:
@@ -48,9 +48,15 @@ def get_YFin_data_online(
 
     # Check if data is empty
     if data.empty:
-        return (
-            f"No data found for symbol '{symbol}' between {start_date} and {end_date}"
-        )
+        if has_market_fallback(symbol):
+            try:
+                return format_fallback_stock_data(symbol, start_date, end_date)
+            except Exception as fallback_error:
+                return (
+                    f"No Yahoo Finance data found for symbol '{symbol}' between {start_date} and {end_date}; "
+                    f"fallback source failed with {fallback_error}"
+                )
+        return f"No data found for symbol '{symbol}' between {start_date} and {end_date}"
 
     # Remove timezone info from index for cleaner output
     if data.index.tz is not None:

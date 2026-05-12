@@ -624,7 +624,7 @@ function AShareView({
   };
 
   const deleteStock = async (stock: StockListItem) => {
-    const confirmed = window.confirm(`确定删除 ${stock.code} ${stock.name} 吗？相关数据也会一起删除。`);
+    const confirmed = window.confirm(`确定从你的自选池删除 ${stock.code} ${stock.name} 吗？不会影响其他用户。`);
     if (!confirmed) return;
     setBusy(true);
     try {
@@ -718,6 +718,27 @@ function AShareView({
             同步全部
           </button>
         </div>
+        <div className="mt-3 grid gap-2 md:max-w-xl">
+          <label>
+            <span className="mb-1 block text-sm font-medium text-slate-700">选择要生成报告的自选股</span>
+            <select
+              value={selectedCode}
+              onChange={(event) => setSelectedCode(event.target.value)}
+              className="w-full rounded border border-line bg-white px-3 py-2 outline-none focus:border-accent"
+              disabled={!stocks.length}
+            >
+              {!stocks.length && <option value="">先添加一只 A 股</option>}
+              {stocks.map((stock) => (
+                <option key={stock.code} value={stock.code}>
+                  {stock.code} ｜ {stock.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          {selectedCode && (
+            <p className="text-sm text-slate-600">当前报告对象：{selectedCode}。也可以在下方表格里点击代码或“选择”。</p>
+          )}
+        </div>
       </section>
 
       <Section title="A股自选池">
@@ -752,13 +773,25 @@ function AShareView({
                   <td>{stock.total_score ?? "-"}</td>
                   <td><Tags tags={stock.risk_tags} /></td>
                   <td>
-                    <button
-                      onClick={() => deleteStock(stock)}
-                      className="inline-flex h-9 w-9 items-center justify-center rounded border border-line bg-white text-slate-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
-                      title="删除"
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setSelectedCode(stock.code)}
+                        className={`inline-flex items-center justify-center rounded border px-3 py-2 text-sm ${
+                          selectedCode === stock.code
+                            ? "border-accent bg-teal-50 text-accent"
+                            : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
+                        }`}
+                      >
+                        {selectedCode === stock.code ? "已选择" : "选择"}
+                      </button>
+                      <button
+                        onClick={() => deleteStock(stock)}
+                        className="inline-flex h-9 w-9 items-center justify-center rounded border border-line bg-white text-slate-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                        title="删除"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}

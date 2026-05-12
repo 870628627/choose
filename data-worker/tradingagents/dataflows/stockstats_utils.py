@@ -8,7 +8,7 @@ from stockstats import wrap
 from typing import Annotated
 import os
 from .a_share_data import get_akshare_ohlcv, is_a_share_symbol
-from .market_fallback_data import get_fallback_ohlcv, has_market_fallback
+from .market_fallback_data import get_fallback_ohlcv, has_market_fallback, is_crypto_symbol
 from .config import get_config
 from .utils import safe_ticker_component
 
@@ -78,7 +78,7 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
     elif is_a_share_symbol(symbol):
         data = get_akshare_ohlcv(symbol, start_str, end_str)
         data.to_csv(data_file, index=False, encoding="utf-8")
-    elif has_market_fallback(symbol):
+    elif is_crypto_symbol(symbol):
         data = get_fallback_ohlcv(symbol, start_str, end_str)
         data.to_csv(data_file, index=False, encoding="utf-8")
     else:
@@ -91,8 +91,13 @@ def load_ohlcv(symbol: str, curr_date: str) -> pd.DataFrame:
                 progress=False,
                 auto_adjust=True,
             ))
+            if data.empty and has_market_fallback(symbol):
+                data = get_fallback_ohlcv(symbol, start_str, end_str)
         except Exception:
-            data = get_fallback_ohlcv(symbol, start_str, end_str)
+            if has_market_fallback(symbol):
+                data = get_fallback_ohlcv(symbol, start_str, end_str)
+            else:
+                raise
         data = data.reset_index()
         data.to_csv(data_file, index=False, encoding="utf-8")
 

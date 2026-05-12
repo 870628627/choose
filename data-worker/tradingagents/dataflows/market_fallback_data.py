@@ -34,6 +34,10 @@ def has_market_fallback(symbol: str) -> bool:
     return normalized in CRYPTO_IDS or stooq_symbol(normalized) is not None
 
 
+def is_crypto_symbol(symbol: str) -> bool:
+    return symbol.strip().upper() in CRYPTO_IDS
+
+
 def _empty_ohlcv() -> pd.DataFrame:
     return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
 

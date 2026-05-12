@@ -1,5 +1,7 @@
 import argparse
+from contextlib import redirect_stdout
 import hashlib
+from io import StringIO
 import json
 import os
 import random
@@ -105,6 +107,15 @@ def try_akshare():
         return None
 
 
+def try_baostock():
+    try:
+        import baostock as bs  # type: ignore
+
+        return bs
+    except Exception:
+        return None
+
+
 def allow_demo_data() -> bool:
     return os.environ.get("DATA_ALLOW_DEMO", "").lower() in {"1", "true", "yes"}
 
@@ -124,6 +135,13 @@ def tx_symbol(code: str) -> str:
     market = detect_market(code).lower()
     if market in {"sh", "sz"}:
         return f"{market}{code}"
+    return code
+
+
+def baostock_symbol(code: str) -> str:
+    market = detect_market(code).lower()
+    if market in {"sh", "sz"}:
+        return f"{market}.{code}"
     return code
 
 
@@ -161,6 +179,53 @@ def fetch_stock_basic(code: str) -> Dict[str, Any]:
 
 
 def fetch_daily_metrics(code: str) -> List[Dict[str, Any]]:
+    bs = try_baostock()
+    if bs:
+        login_result = None
+        try:
+            with redirect_stdout(StringIO()):
+                login_result = bs.login()
+            if getattr(login_result, "error_code", "0") != "0":
+                raise RuntimeError(getattr(login_result, "error_msg", "baostock login failed"))
+            end = date.today().isoformat()
+            start = (date.today() - timedelta(days=45)).isoformat()
+            fields = "date,close,volume,turn,peTTM,pbMRQ,psTTM"
+            result = bs.query_history_k_data_plus(
+                baostock_symbol(code),
+                fields,
+                start_date=start,
+                end_date=end,
+                frequency="d",
+                adjustflag="3",
+            )
+            rows = []
+            while result.error_code == "0" and result.next():
+                item = dict(zip(result.fields, result.get_row_data()))
+                rows.append({
+                    "trade_date": str(item.get("date", ""))[:10],
+                    "close_price": _to_float(item.get("close")),
+                    "pe": None,
+                    "pe_ttm": _to_float(item.get("peTTM")),
+                    "pb": _to_float(item.get("pbMRQ")),
+                    "ps": _to_float(item.get("psTTM")),
+                    "dividend_yield": None,
+                    "market_cap": None,
+                    "turnover_rate": _to_float(item.get("turn")),
+                    "source": "baostock"
+                })
+            rows = [item for item in rows if item["trade_date"] and item["close_price"] is not None]
+            if rows:
+                return rows[-20:]
+        except Exception:
+            pass
+        finally:
+            try:
+                if login_result is not None:
+                    with redirect_stdout(StringIO()):
+                        bs.logout()
+            except Exception:
+                pass
+
     ak = try_akshare()
     if ak:
         try:

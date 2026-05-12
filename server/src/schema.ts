@@ -63,6 +63,17 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS user_stocks (
+      user_id INTEGER NOT NULL,
+      stock_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY(user_id, stock_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(stock_id) REFERENCES stocks(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_stocks_user_created ON user_stocks(user_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS daily_metrics (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       stock_id INTEGER NOT NULL,
