@@ -25,6 +25,27 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "sync", label: "同步管理", icon: RefreshCw }
 ];
 
+const tradingAgentIntroductions = [
+  { name: "行情技术 Agent", role: "读取股价、成交量和技术指标，判断趋势、波动和关键价位。" },
+  { name: "情绪 Agent", role: "整理市场讨论和情绪信号，提示过热、分歧或冷清状态。" },
+  { name: "新闻 Agent", role: "归纳近期新闻、公告和宏观线索，找出可能影响交易的事件。" },
+  { name: "基本面 Agent", role: "查看公司资料、财务质量和经营变化，形成基本面判断。" },
+  { name: "多空研究员", role: "分别提出看多和看空理由，再由研究经理形成交易摘要。" },
+  { name: "交易与风控 Agent", role: "把研究结论转成交易方案，并由风险团队复核最终决策。" }
+];
+
+const tradingAgentProgressSteps = [
+  { title: "启动任务", detail: "校验股票代码、模型密钥和运行参数。", seconds: 8 },
+  { title: "行情技术分析", detail: "Market Analyst 读取价格、成交量和技术指标。", seconds: 45 },
+  { title: "情绪线索整理", detail: "Social/Sentiment Analyst 检查市场讨论和情绪信号。", seconds: 45 },
+  { title: "新闻公告分析", detail: "News Analyst 汇总近期新闻、公告和宏观事件。", seconds: 45 },
+  { title: "基本面分析", detail: "Fundamentals Analyst 研究财务、公司资料和经营质量。", seconds: 60 },
+  { title: "多空辩论", detail: "看多、看空研究员互相辩论，研究经理提炼结论。", seconds: 55 },
+  { title: "交易员方案", detail: "Trader Agent 生成交易动作、仓位思路和执行方案。", seconds: 35 },
+  { title: "风险团队复核", detail: "激进、中性、保守风险角色复核交易方案。", seconds: 55 },
+  { title: "最终决策", detail: "Portfolio Manager 汇总最终交易决策和中文报告。", seconds: 25 }
+];
+
 function formatNumber(value: unknown, digits = 2) {
   if (value === null || value === undefined || value === "") return "-";
   const number = Number(value);
@@ -46,6 +67,37 @@ function downloadTextFile(filename: string, content: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function formatElapsed(seconds: number) {
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return minutes ? `${minutes}分${rest.toString().padStart(2, "0")}秒` : `${rest}秒`;
+}
+
+function getTradingAgentProgress(elapsedSeconds: number) {
+  const totalSeconds = tradingAgentProgressSteps.reduce((sum, step) => sum + step.seconds, 0);
+  let cumulative = 0;
+
+  for (let index = 0; index < tradingAgentProgressSteps.length; index += 1) {
+    cumulative += tradingAgentProgressSteps[index].seconds;
+    if (elapsedSeconds < cumulative) {
+      return {
+        index,
+        percent: Math.max(4, Math.min(95, Math.round((elapsedSeconds / totalSeconds) * 95))),
+        step: tradingAgentProgressSteps[index]
+      };
+    }
+  }
+
+  return {
+    index: tradingAgentProgressSteps.length - 1,
+    percent: 95,
+    step: {
+      title: "等待最终返回",
+      detail: "后台仍在整合模型输出，页面会在报告返回后自动展示。"
+    }
+  };
 }
 
 function Tags({ tags }: { tags?: string[] }) {
@@ -179,6 +231,21 @@ function HomeView({
 
   return (
     <div>
+      <section className="mb-5 border-b border-line pb-5">
+        <div className="mb-3 flex flex-col gap-1">
+          <h2 className="text-lg font-semibold text-ink">TradingAgents 角色简介</h2>
+          <p className="text-sm text-slate-600">生成报告时会由多个角色接力完成，从数据分析到交易方案再到风险复核。</p>
+        </div>
+        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {tradingAgentIntroductions.map((agent) => (
+            <div key={agent.name} className="rounded border border-line bg-white p-3">
+              <div className="mb-1 text-sm font-semibold text-ink">{agent.name}</div>
+              <p className="text-sm leading-6 text-slate-600">{agent.role}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
       <div className="mb-5 flex flex-col gap-3 border-b border-line pb-5 md:flex-row md:items-end">
         <label className="flex-1">
           <span className="mb-1 block text-sm font-medium text-slate-700">股票代码</span>
@@ -267,6 +334,7 @@ function DetailView({
   const [agentReport, setAgentReport] = useState<TradingAgentsReport | null>(null);
   const [agentLoading, setAgentLoading] = useState(false);
   const [agentError, setAgentError] = useState("");
+  const [agentElapsedSeconds, setAgentElapsedSeconds] = useState(0);
 
   const loadDetail = async () => {
     if (!selectedCode) return;
@@ -276,8 +344,17 @@ function DetailView({
   useEffect(() => {
     setAgentReport(null);
     setAgentError("");
+    setAgentElapsedSeconds(0);
     loadDetail().catch(() => setDetail(null));
   }, [selectedCode]);
+
+  useEffect(() => {
+    if (!agentLoading) return;
+    const timer = window.setInterval(() => {
+      setAgentElapsedSeconds((current) => current + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [agentLoading]);
 
   const syncOne = async () => {
     if (!selectedCode) return;
@@ -290,6 +367,7 @@ function DetailView({
     if (!selectedCode) return;
     setAgentLoading(true);
     setAgentError("");
+    setAgentElapsedSeconds(0);
     try {
       setAgentReport((await api.tradingAgentsReport(selectedCode)) as TradingAgentsReport);
     } catch (error) {
@@ -361,9 +439,7 @@ function DetailView({
                 </p>
               )}
               {agentLoading && (
-                <p className="text-sm leading-6 text-slate-600">
-                  正在运行多 agent 分析，通常需要几分钟。请保持后端服务运行，不要重复点击。
-                </p>
+                <TradingAgentsProgress elapsedSeconds={agentElapsedSeconds} />
               )}
               {agentError && (
                 <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
@@ -446,6 +522,54 @@ function Metric({ label, value }: { label: string; value: unknown }) {
     <div className="border-l-2 border-accent pl-3">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="text-lg font-semibold text-ink">{String(value)}</div>
+    </div>
+  );
+}
+
+function TradingAgentsProgress({ elapsedSeconds }: { elapsedSeconds: number }) {
+  const progress = getTradingAgentProgress(elapsedSeconds);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="text-sm font-semibold text-ink">当前阶段：{progress.step.title}</div>
+            <p className="text-sm leading-6 text-slate-600">{progress.step.detail}</p>
+          </div>
+          <div className="text-sm text-slate-500">已用时 {formatElapsed(elapsedSeconds)}</div>
+        </div>
+        <div className="h-2 overflow-hidden rounded bg-slate-100">
+          <div className="h-full rounded bg-accent transition-all duration-500" style={{ width: `${progress.percent}%` }} />
+        </div>
+        <p className="mt-2 text-xs text-slate-500">进度按 TradingAgents 的执行流程估算，报告返回后会自动切换为完整结果。</p>
+      </div>
+
+      <div className="grid gap-2 md:grid-cols-2">
+        {tradingAgentProgressSteps.map((step, index) => {
+          const status = index < progress.index ? "已完成" : index === progress.index ? "进行中" : "等待中";
+          const active = index === progress.index;
+          const done = index < progress.index;
+          return (
+            <div
+              key={step.title}
+              className={`rounded border p-3 text-sm ${
+                active
+                  ? "border-accent bg-teal-50"
+                  : done
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-line bg-white"
+              }`}
+            >
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="font-medium text-ink">{step.title}</span>
+                <span className={active ? "text-accent" : done ? "text-emerald-700" : "text-slate-500"}>{status}</span>
+              </div>
+              <p className="leading-6 text-slate-600">{step.detail}</p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
