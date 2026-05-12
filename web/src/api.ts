@@ -49,6 +49,12 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify({})
     }),
+  tradingAgentsSymbolReport: (symbol: string) =>
+    request("/api/tradingagents-report", {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ symbol })
+    }),
   compare: (codes: string[]) => request(`/api/compare?codes=${codes.join(",")}`),
   risks: () => request("/api/risks"),
   reviews: () => request("/api/reviews"),

@@ -376,6 +376,8 @@ def sync_one(code: str) -> Dict[str, Any]:
 
 def yahoo_a_share_symbol(code: str) -> str:
     normalized = code.strip().upper()
+    if normalized.endswith(".SH") and len(normalized[:-3]) == 6 and normalized[:-3].isdigit():
+        return f"{normalized[:-3]}.SS"
     if "." in normalized:
         return normalized
     if normalized.startswith("6"):

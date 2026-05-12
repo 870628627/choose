@@ -18,8 +18,8 @@ type View = "home" | "detail" | "compare" | "risks" | "reviews" | "sync";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "home", label: "首页", icon: Home },
-  { id: "detail", label: "股票详情", icon: BookOpenText },
-  { id: "compare", label: "股票对比", icon: BarChart3 },
+  { id: "detail", label: "自选详情", icon: BookOpenText },
+  { id: "compare", label: "自选对比", icon: BarChart3 },
   { id: "risks", label: "风险排雷", icon: ShieldAlert },
   { id: "reviews", label: "复盘", icon: FileClock },
   { id: "sync", label: "同步管理", icon: RefreshCw }
@@ -143,8 +143,8 @@ export default function App() {
       <header className="border-b border-line bg-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-semibold tracking-normal text-ink">A股研究</h1>
-            <p className="text-sm text-slate-600">自动数据、研究评分、风险标签和复盘</p>
+            <h1 className="text-2xl font-semibold tracking-normal text-ink">AlphaScope 全球资产研究台</h1>
+            <p className="text-sm text-slate-600">A 股、美股、BTC 等多资产研究、交易观点和复盘</p>
           </div>
           <nav className="flex flex-wrap gap-2">
             {navItems.map((item) => {
@@ -186,7 +186,7 @@ export default function App() {
       </main>
 
       <footer className="fixed inset-x-0 bottom-0 border-t border-line bg-white px-4 py-3 text-center text-sm text-slate-700">
-        本工具可生成股票研究、交易观点、目标价和涨跌判断。模型结论可能错误或滞后，实际交易请自行确认数据并控制风险。
+        AlphaScope 可生成多资产研究、交易观点、目标价和涨跌判断。模型结论可能错误或滞后，实际交易请自行确认数据并控制风险。
       </footer>
     </div>
   );
@@ -203,6 +203,19 @@ function HomeView({
 }) {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const [assetSymbol, setAssetSymbol] = useState("");
+  const [assetReport, setAssetReport] = useState<TradingAgentsReport | null>(null);
+  const [assetLoading, setAssetLoading] = useState(false);
+  const [assetError, setAssetError] = useState("");
+  const [assetElapsedSeconds, setAssetElapsedSeconds] = useState(0);
+
+  useEffect(() => {
+    if (!assetLoading) return;
+    const timer = window.setInterval(() => {
+      setAssetElapsedSeconds((current) => current + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [assetLoading]);
 
   const addStock = async () => {
     if (!/^\d{6}$/.test(code)) return;
@@ -229,6 +242,28 @@ function HomeView({
     }
   };
 
+  const runAssetReport = async () => {
+    const symbol = assetSymbol.trim();
+    if (!symbol) return;
+    setAssetLoading(true);
+    setAssetError("");
+    setAssetReport(null);
+    setAssetElapsedSeconds(0);
+    try {
+      setAssetReport((await api.tradingAgentsSymbolReport(symbol)) as TradingAgentsReport);
+    } catch (error) {
+      setAssetError((error as Error).message);
+    } finally {
+      setAssetLoading(false);
+    }
+  };
+
+  const exportAssetReport = () => {
+    if (!assetReport) return;
+    const name = `${safeFileName(assetReport.code)}-${safeFileName(assetReport.trade_date)}.md`;
+    downloadTextFile(name, buildTradingAgentsMarkdown(assetReport));
+  };
+
   return (
     <div>
       <section className="mb-5 border-b border-line pb-5">
@@ -246,9 +281,52 @@ function HomeView({
         </div>
       </section>
 
+      <section className="mb-5 border-b border-line pb-5">
+        <div className="mb-3 flex flex-col gap-1">
+          <h2 className="text-lg font-semibold text-ink">全球资产 TradingAgents 报告</h2>
+          <p className="text-sm text-slate-600">输入 A 股、美股或加密资产符号，直接生成中文交易研究报告。</p>
+        </div>
+        <div className="flex flex-col gap-3 md:flex-row md:items-end">
+          <label className="flex-1">
+            <span className="mb-1 block text-sm font-medium text-slate-700">资产符号</span>
+            <input
+              value={assetSymbol}
+              onChange={(event) => setAssetSymbol(event.target.value.toUpperCase().replace(/[^A-Z0-9._-]/g, "").slice(0, 32))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") runAssetReport();
+              }}
+              placeholder="例如 600519、NVDA、BTC-USD"
+              className="w-full rounded border border-line bg-white px-3 py-2 outline-none focus:border-accent"
+            />
+          </label>
+          <button
+            disabled={assetLoading || !assetSymbol.trim()}
+            onClick={runAssetReport}
+            className="inline-flex items-center justify-center gap-2 rounded border border-accent bg-accent px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Sparkles size={16} />
+            {assetLoading ? "生成中" : "生成全球资产报告"}
+          </button>
+        </div>
+        <div className="mt-4 rounded border border-line bg-white p-4">
+          {!assetReport && !assetLoading && !assetError && (
+            <p className="text-sm leading-6 text-slate-600">
+              A 股输入 6 位代码即可；美股使用 Yahoo Finance 符号，如 NVDA；BTC 可用 BTC-USD。
+            </p>
+          )}
+          {assetLoading && <TradingAgentsProgress elapsedSeconds={assetElapsedSeconds} />}
+          {assetError && (
+            <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
+              {assetError}
+            </div>
+          )}
+          {assetReport && <TradingAgentsReportView report={assetReport} onExport={exportAssetReport} />}
+        </div>
+      </section>
+
       <div className="mb-5 flex flex-col gap-3 border-b border-line pb-5 md:flex-row md:items-end">
         <label className="flex-1">
-          <span className="mb-1 block text-sm font-medium text-slate-700">股票代码</span>
+          <span className="mb-1 block text-sm font-medium text-slate-700">A 股自选代码</span>
           <input
             value={code}
             onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
@@ -447,34 +525,7 @@ function DetailView({
                 </div>
               )}
               {agentReport && (
-                <div className="space-y-4">
-                  <div className="flex flex-col gap-3 border-b border-line pb-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex flex-wrap gap-3 text-sm text-slate-600">
-                      <span>代码：{agentReport.code}</span>
-                      <span>行情符号：{agentReport.symbol}</span>
-                      <span>分析日期：{agentReport.trade_date}</span>
-                    </div>
-                    <button
-                      onClick={exportTradingAgentsReport}
-                      className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
-                      title="导出报告"
-                    >
-                      <Download size={16} />
-                      导出报告
-                    </button>
-                  </div>
-                  {Object.entries(agentReport.sections).map(([key, value]) => (
-                    value ? (
-                      <article key={key} className="border-t border-line pt-4">
-                        <h3 className="mb-2 text-base font-semibold text-ink">{agentSectionTitle(key)}</h3>
-                        <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{value}</p>
-                      </article>
-                    ) : null
-                  ))}
-                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
-                    {agentReport.risk_notice}
-                  </div>
-                </div>
+                <TradingAgentsReportView report={agentReport} onExport={exportTradingAgentsReport} />
               )}
             </div>
           </Section>
@@ -522,6 +573,39 @@ function Metric({ label, value }: { label: string; value: unknown }) {
     <div className="border-l-2 border-accent pl-3">
       <div className="text-xs text-slate-500">{label}</div>
       <div className="text-lg font-semibold text-ink">{String(value)}</div>
+    </div>
+  );
+}
+
+function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsReport; onExport: () => void }) {
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 border-b border-line pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+          <span>代码：{report.code}</span>
+          <span>行情符号：{report.symbol}</span>
+          <span>分析日期：{report.trade_date}</span>
+        </div>
+        <button
+          onClick={onExport}
+          className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
+          title="导出报告"
+        >
+          <Download size={16} />
+          导出报告
+        </button>
+      </div>
+      {Object.entries(report.sections).map(([key, value]) => (
+        value ? (
+          <article key={key} className="border-t border-line pt-4">
+            <h3 className="mb-2 text-base font-semibold text-ink">{agentSectionTitle(key)}</h3>
+            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{value}</p>
+          </article>
+        ) : null
+      ))}
+      <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+        {report.risk_notice}
+      </div>
     </div>
   );
 }

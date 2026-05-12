@@ -31,6 +31,14 @@ const reviewSchema = z.object({
 const tradingAgentsReportSchema = z.object({
   trade_date: z.string().min(8).optional()
 });
+const globalTradingAgentsReportSchema = z.object({
+  symbol: z.string().min(1).max(32).regex(/^[A-Za-z0-9._-]+$/),
+  trade_date: z.string().min(8).optional()
+});
+
+function tradingAgentsTimeoutMs() {
+  return Number(process.env.TRADINGAGENTS_REPORT_TIMEOUT_MS || 900000);
+}
 
 function upsertStock(basic: WorkerStockBasic) {
   db.prepare(
@@ -144,7 +152,7 @@ function withParsedRiskTags<T extends Record<string, unknown>>(row: T) {
 }
 
 app.get("/api/health", (_req, res) => {
-  res.json({ ok: true, service: "family-a-share-server" });
+  res.json({ ok: true, service: "alphascope-server" });
 });
 
 app.get("/api/stocks", (_req, res) => {
@@ -241,7 +249,23 @@ app.post("/api/stocks/:code/tradingagents-report", async (req, res, next) => {
 
     const report = await runDataWorker<TradingAgentsReport>("run_tradingagents_report", args, {
       strict: true,
-      timeoutMs: Number(process.env.TRADINGAGENTS_REPORT_TIMEOUT_MS || 900000)
+      timeoutMs: tradingAgentsTimeoutMs()
+    });
+    res.json(report);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/tradingagents-report", async (req, res, next) => {
+  try {
+    const body = globalTradingAgentsReportSchema.parse(req.body ?? {});
+    const args: Record<string, string> = { code: body.symbol.trim().toUpperCase() };
+    if (body.trade_date) args.trade_date = body.trade_date;
+
+    const report = await runDataWorker<TradingAgentsReport>("run_tradingagents_report", args, {
+      strict: true,
+      timeoutMs: tradingAgentsTimeoutMs()
     });
     res.json(report);
   } catch (error) {
@@ -434,7 +458,7 @@ app.use((error: unknown, _req: express.Request, res: express.Response, _next: ex
 });
 
 const server = app.listen(port, () => {
-  console.log(`family A-share server listening on http://localhost:${port}`);
+  console.log(`AlphaScope server listening on http://localhost:${port}`);
 });
 
 server.requestTimeout = requestTimeoutMs;
