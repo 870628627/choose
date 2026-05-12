@@ -1,3 +1,13 @@
+function tryExec(db: { exec: (sql: string) => void }, sql: string, ignoredMessagePart: string) {
+  try {
+    db.exec(sql);
+  } catch (error) {
+    if (!String((error as Error).message).includes(ignoredMessagePart)) {
+      throw error;
+    }
+  }
+}
+
 export function initializeSchema(db: { exec: (sql: string) => void }) {
   db.exec("PRAGMA journal_mode = WAL");
   db.exec("PRAGMA foreign_keys = ON");
@@ -6,6 +16,7 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       username TEXT NOT NULL UNIQUE,
+      email TEXT,
       display_name TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       password_salt TEXT NOT NULL,
@@ -151,4 +162,8 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
       detail_json TEXT
     );
   `);
+
+  tryExec(db, "ALTER TABLE users ADD COLUMN email TEXT", "duplicate column");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)");
+  db.exec("UPDATE users SET email = username WHERE email IS NULL AND username LIKE '%@%'");
 }

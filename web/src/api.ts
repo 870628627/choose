@@ -42,17 +42,17 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  register: (username: string, password: string, displayName?: string) =>
+  register: (email: string, password: string) =>
     request<AuthSession>("/api/auth/register", {
       method: "POST",
       headers: jsonHeaders,
-      body: JSON.stringify({ username, password, display_name: displayName })
+      body: JSON.stringify({ email, password })
     }),
-  login: (username: string, password: string) =>
+  login: (email: string, password: string) =>
     request<AuthSession>("/api/auth/login", {
       method: "POST",
       headers: jsonHeaders,
-      body: JSON.stringify({ username, password })
+      body: JSON.stringify({ email, password })
     }),
   logout: () =>
     request<{ ok: true }>("/api/auth/logout", {

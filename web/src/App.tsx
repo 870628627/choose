@@ -146,8 +146,7 @@ function AuthLoading() {
 
 function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => void }) {
   const [mode, setMode] = useState<"login" | "register">("login");
-  const [username, setUsername] = useState("");
-  const [displayName, setDisplayName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -157,10 +156,10 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
     setBusy(true);
     setError("");
     try {
-      const normalized = username.trim();
+      const normalized = email.trim().toLowerCase();
       const session = mode === "login"
         ? await api.login(normalized, password)
-        : await api.register(normalized, password, displayName.trim() || undefined);
+        : await api.register(normalized, password);
       onAuthenticated(session);
     } catch (requestError) {
       setError((requestError as Error).message);
@@ -248,26 +247,16 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
 
           <form className="space-y-4" onSubmit={submit}>
             <label className="block">
-              <span className="mb-1 flex items-center gap-2 text-sm text-slate-300"><User size={15} />账号</span>
+              <span className="mb-1 flex items-center gap-2 text-sm text-slate-300"><User size={15} />邮箱</span>
               <input
-                value={username}
-                onChange={(event) => setUsername(event.target.value.replace(/[^A-Za-z0-9_]/g, "").slice(0, 32))}
+                value={email}
+                onChange={(event) => setEmail(event.target.value.trim().slice(0, 254))}
+                type="email"
                 autoComplete="username"
-                placeholder="trader_name"
+                placeholder="trader@example.com"
                 className="w-full rounded border border-white/10 bg-black/40 px-3 py-2 text-slate-100 outline-none focus:border-emerald-300"
               />
             </label>
-            {mode === "register" && (
-              <label className="block">
-                <span className="mb-1 block text-sm text-slate-300">显示名</span>
-                <input
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value.slice(0, 32))}
-                  placeholder="你的研究台名称"
-                  className="w-full rounded border border-white/10 bg-black/40 px-3 py-2 text-slate-100 outline-none focus:border-emerald-300"
-                />
-              </label>
-            )}
             <label className="block">
               <span className="mb-1 flex items-center gap-2 text-sm text-slate-300"><LockKeyhole size={15} />密码</span>
               <input
@@ -285,7 +274,7 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
               </div>
             )}
             <button
-              disabled={busy || username.length < 3 || password.length < 8}
+              disabled={busy || !email.includes("@") || password.length < 8}
               className="flex w-full items-center justify-center gap-2 rounded border border-emerald-300 bg-emerald-400 px-4 py-2.5 font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {mode === "login" ? <LogIn size={17} /> : <UserPlus size={17} />}

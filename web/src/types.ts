@@ -45,7 +45,7 @@ export type TradingAgentsReport = {
 
 export type AuthUser = {
   id: number;
-  username: string;
+  email: string;
   display_name: string;
 };
 

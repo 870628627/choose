@@ -4,7 +4,7 @@ import { db } from "./db.js";
 
 export type AuthUser = {
   id: number;
-  username: string;
+  email: string;
   display_name: string;
 };
 
@@ -14,8 +14,15 @@ export type AuthenticatedRequest = express.Request & {
 
 const SESSION_DAYS = Number(process.env.AUTH_SESSION_DAYS || 30);
 
-function normalizeUsername(username: string) {
-  return username.trim().toLowerCase();
+function normalizeEmail(email: string) {
+  return email.trim().toLowerCase();
+}
+
+function usernameFromEmail(email: string) {
+  const localPart = email.split("@")[0] || "trader";
+  const slug = localPart.replace(/[^a-z0-9_]/gi, "_").replace(/^_+|_+$/g, "").slice(0, 18) || "trader";
+  const suffix = crypto.createHash("sha1").update(email).digest("hex").slice(0, 10);
+  return `${slug}_${suffix}`.toLowerCase();
 }
 
 function hashPassword(password: string, salt: string) {
@@ -31,39 +38,43 @@ function expiresAt() {
 }
 
 function publicUser(row: Record<string, unknown>): AuthUser {
+  const email = String(row.email || row.username);
   return {
     id: Number(row.id),
-    username: String(row.username),
-    display_name: String(row.display_name)
+    email,
+    display_name: String(row.display_name || email.split("@")[0] || "Trader")
   };
 }
 
-export function createUser(username: string, password: string, displayName?: string) {
-  const normalized = normalizeUsername(username);
+export function createUser(email: string, password: string) {
+  const normalized = normalizeEmail(email);
   const salt = crypto.randomBytes(16).toString("hex");
   const passwordHash = hashPassword(password, salt);
+  const username = usernameFromEmail(normalized);
+  const displayName = normalized.split("@")[0] || "Trader";
 
   const result = db
     .prepare(
       `
-      INSERT INTO users (username, display_name, password_hash, password_salt)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO users (username, email, display_name, password_hash, password_salt)
+      VALUES (?, ?, ?, ?, ?)
     `
     )
-    .run(normalized, displayName?.trim() || normalized, passwordHash, salt);
+    .run(username, normalized, displayName, passwordHash, salt);
 
   return getUserById(Number(result.lastInsertRowid));
 }
 
 export function getUserById(id: number) {
-  const row = db.prepare("SELECT id, username, display_name FROM users WHERE id = ?").get(id) as Record<string, unknown> | undefined;
+  const row = db.prepare("SELECT id, username, email, display_name FROM users WHERE id = ?").get(id) as Record<string, unknown> | undefined;
   return row ? publicUser(row) : null;
 }
 
-export function verifyUser(username: string, password: string) {
+export function verifyUser(email: string, password: string) {
+  const normalized = normalizeEmail(email);
   const row = db
-    .prepare("SELECT * FROM users WHERE username = ?")
-    .get(normalizeUsername(username)) as Record<string, unknown> | undefined;
+    .prepare("SELECT * FROM users WHERE email = ? OR username = ?")
+    .get(normalized, normalized) as Record<string, unknown> | undefined;
   if (!row) return null;
 
   const expected = Buffer.from(String(row.password_hash), "hex");
@@ -100,6 +111,7 @@ export function userFromToken(token: string) {
     .prepare(
       `
       SELECT u.id, u.username, u.display_name
+      , u.email
       FROM auth_sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.token_hash = ?

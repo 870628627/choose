@@ -38,11 +38,10 @@ const globalTradingAgentsReportSchema = z.object({
   trade_date: z.string().min(8).optional()
 });
 const authSchema = z.object({
-  username: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9_]+$/),
-  password: z.string().min(8).max(128),
-  display_name: z.string().trim().min(1).max(32).optional()
+  email: z.string().trim().email("请输入有效邮箱").max(254),
+  password: z.string().min(8, "密码至少 8 位").max(128)
 });
-const loginSchema = authSchema.pick({ username: true, password: true });
+const loginSchema = authSchema;
 
 function tradingAgentsTimeoutMs() {
   return Number(process.env.TRADINGAGENTS_REPORT_TIMEOUT_MS || 900000);
@@ -199,7 +198,7 @@ app.get("/api/health", (_req, res) => {
 app.post("/api/auth/register", (req, res, next) => {
   try {
     const body = authSchema.parse(req.body ?? {});
-    const user = createUser(body.username, body.password, body.display_name);
+    const user = createUser(body.email, body.password);
     if (!user) {
       res.status(400).json({ error: "注册失败" });
       return;
@@ -208,7 +207,7 @@ app.post("/api/auth/register", (req, res, next) => {
     res.status(201).json({ token, user });
   } catch (error) {
     const message = error instanceof Error && error.message.includes("UNIQUE")
-      ? "用户名已存在"
+      ? "邮箱已注册"
       : (error as Error).message;
     next(new Error(message));
   }
@@ -217,9 +216,9 @@ app.post("/api/auth/register", (req, res, next) => {
 app.post("/api/auth/login", (req, res, next) => {
   try {
     const body = loginSchema.parse(req.body ?? {});
-    const user = verifyUser(body.username, body.password);
+    const user = verifyUser(body.email, body.password);
     if (!user) {
-      res.status(401).json({ error: "用户名或密码不正确" });
+      res.status(401).json({ error: "邮箱或密码不正确" });
       return;
     }
     const token = createSession(user.id);
