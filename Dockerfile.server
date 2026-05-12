@@ -29,6 +29,7 @@ RUN python3 -m venv /opt/venv \
   && /opt/venv/bin/pip install --no-cache-dir -r /app/data-worker/requirements.txt
 
 ENV PATH="/opt/venv/bin:${PATH}" \
+  PYTHONPATH=/app/data-worker \
   NODE_ENV=production \
   PORT=3001 \
   DATABASE_PATH=./data/app.db \
