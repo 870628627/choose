@@ -35,14 +35,6 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify(code ? { code } : {})
     }),
-  syncLogs: () => request("/api/sync-logs"),
-  dataQuality: () => request("/api/data-quality"),
-  addNote: (code: string, author: string, content: string) =>
-    request(`/api/stocks/${code}/notes`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ author, content })
-    }),
   tradingAgentsReport: (code: string) =>
     request(`/api/stocks/${code}/tradingagents-report`, {
       method: "POST",
@@ -54,14 +46,5 @@ export const api = {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify({ symbol })
-    }),
-  compare: (codes: string[]) => request(`/api/compare?codes=${codes.join(",")}`),
-  risks: () => request("/api/risks"),
-  reviews: () => request("/api/reviews"),
-  addReview: (body: Record<string, unknown>) =>
-    request("/api/reviews", {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify(body)
     })
 };

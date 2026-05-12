@@ -2,7 +2,7 @@
   "name": "family-a-share-research-notebook",
   "private": true,
   "version": "0.1.0",
-  "description": "AlphaScope 全球资产研究台，支持 A 股自选数据、全球资产 TradingAgents 报告、研究评分、风险标签和复盘。",
+  "description": "AlphaScope 全球资产研究台，支持 A 股自选数据、美股报告、加密资产报告、研究评分和风险标签。",
   "scripts": {
     "install:all": "npm install --prefix server && npm install --prefix web",
     "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix web\"",
