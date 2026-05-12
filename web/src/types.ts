@@ -32,6 +32,21 @@ export type StockDetail = {
   };
 };
 
+export type TradingAgentsReport = {
+  code: string;
+  symbol: string;
+  trade_date: string;
+  language: "Chinese";
+  sections: {
+    market_report?: string;
+    news_report?: string;
+    fundamentals_report?: string;
+    research_plan?: string;
+    risk_review?: string;
+  };
+  compliance_notice: string;
+};
+
 export type SyncLog = {
   id: number;
   sync_type: string;

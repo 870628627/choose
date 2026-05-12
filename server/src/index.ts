@@ -6,7 +6,7 @@ import { db, getStockByCode, listStocks } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
 import { buildMockAiReport } from "./ai.js";
 import { createResearchScore } from "./scoring.js";
-import type { WorkerStockBasic, WorkerStockPayload } from "./types.js";
+import type { TradingAgentsReport, WorkerStockBasic, WorkerStockPayload } from "./types.js";
 import type { WorkerAnnouncement, WorkerDailyMetric, WorkerFinancialMetric } from "./types.js";
 
 const app = express();
@@ -26,6 +26,9 @@ const reviewSchema = z.object({
   initial_judgement: z.string().min(1).max(2000),
   observed_result: z.string().max(2000).optional().default(""),
   lessons: z.string().max(2000).optional().default("")
+});
+const tradingAgentsReportSchema = z.object({
+  trade_date: z.string().min(8).optional()
 });
 
 function upsertStock(basic: WorkerStockBasic) {
@@ -220,6 +223,28 @@ app.post("/api/stocks/:code/notes", (req, res, next) => {
       .prepare("INSERT INTO family_notes (stock_id, author, content) VALUES (?, ?, ?)")
       .run(stock.id, body.author, body.content);
     res.status(201).json({ id: result.lastInsertRowid });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/stocks/:code/tradingagents-report", async (req, res, next) => {
+  try {
+    const stock = getStockByCode(req.params.code) as { id: number; code: string } | undefined;
+    if (!stock) {
+      res.status(404).json({ error: "Stock not found" });
+      return;
+    }
+
+    const body = tradingAgentsReportSchema.parse(req.body ?? {});
+    const args: Record<string, string> = { code: stock.code };
+    if (body.trade_date) args.trade_date = body.trade_date;
+
+    const report = await runDataWorker<TradingAgentsReport>("run_tradingagents_report", args, {
+      strict: true,
+      timeoutMs: Number(process.env.TRADINGAGENTS_REPORT_TIMEOUT_MS || 900000)
+    });
+    res.json(report);
   } catch (error) {
     next(error);
   }

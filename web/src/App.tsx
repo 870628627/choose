@@ -6,11 +6,12 @@ import {
   Home,
   RefreshCw,
   Search,
+  Sparkles,
   ShieldAlert,
   Trash2
 } from "lucide-react";
 import { api } from "./api";
-import type { DataQualityRow, StockDetail, StockListItem, SyncLog } from "./types";
+import type { DataQualityRow, StockDetail, StockListItem, SyncLog, TradingAgentsReport } from "./types";
 
 type View = "home" | "detail" | "compare" | "risks" | "reviews" | "sync";
 
@@ -246,6 +247,9 @@ function DetailView({
   reloadStocks: () => Promise<void>;
 }) {
   const [detail, setDetail] = useState<StockDetail | null>(null);
+  const [agentReport, setAgentReport] = useState<TradingAgentsReport | null>(null);
+  const [agentLoading, setAgentLoading] = useState(false);
+  const [agentError, setAgentError] = useState("");
 
   const loadDetail = async () => {
     if (!selectedCode) return;
@@ -253,6 +257,8 @@ function DetailView({
   };
 
   useEffect(() => {
+    setAgentReport(null);
+    setAgentError("");
     loadDetail().catch(() => setDetail(null));
   }, [selectedCode]);
 
@@ -261,6 +267,19 @@ function DetailView({
     await api.sync(selectedCode);
     await reloadStocks();
     await loadDetail();
+  };
+
+  const runTradingAgents = async () => {
+    if (!selectedCode) return;
+    setAgentLoading(true);
+    setAgentError("");
+    try {
+      setAgentReport((await api.tradingAgentsReport(selectedCode)) as TradingAgentsReport);
+    } catch (error) {
+      setAgentError((error as Error).message);
+    } finally {
+      setAgentLoading(false);
+    }
   };
 
   if (!stocks.length) return <p className="text-slate-600">请先在首页添加股票。</p>;
@@ -280,6 +299,14 @@ function DetailView({
         <button onClick={syncOne} className="inline-flex items-center gap-2 rounded border border-line bg-white px-3 py-2">
           <RefreshCw size={16} />
           同步当前股票
+        </button>
+        <button
+          onClick={runTradingAgents}
+          disabled={agentLoading}
+          className="inline-flex items-center gap-2 rounded border border-accent bg-accent px-3 py-2 text-white disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          <Sparkles size={16} />
+          {agentLoading ? "生成中文研究报告中" : "生成 TradingAgents 中文报告"}
         </button>
       </div>
 
@@ -311,6 +338,46 @@ function DetailView({
                   <p>{value}</p>
                 </div>
               ))}
+            </div>
+          </Section>
+
+          <Section title="TradingAgents 中文研究报告">
+            <div className="rounded border border-line bg-white p-4">
+              {!agentReport && !agentLoading && !agentError && (
+                <p className="text-sm leading-6 text-slate-600">
+                  点击上方按钮后，系统会调用 TradingAgents 生成中文研究材料。报告仅用于家庭自用研究、信息整理和复盘。
+                </p>
+              )}
+              {agentLoading && (
+                <p className="text-sm leading-6 text-slate-600">
+                  正在运行多 agent 分析，通常需要几分钟。请保持后端服务运行，不要重复点击。
+                </p>
+              )}
+              {agentError && (
+                <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
+                  {agentError}
+                </div>
+              )}
+              {agentReport && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap gap-3 text-sm text-slate-600">
+                    <span>代码：{agentReport.code}</span>
+                    <span>行情符号：{agentReport.symbol}</span>
+                    <span>分析日期：{agentReport.trade_date}</span>
+                  </div>
+                  {Object.entries(agentReport.sections).map(([key, value]) => (
+                    value ? (
+                      <article key={key} className="border-t border-line pt-4">
+                        <h3 className="mb-2 text-base font-semibold text-ink">{agentSectionTitle(key)}</h3>
+                        <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{value}</p>
+                      </article>
+                    ) : null
+                  ))}
+                  <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
+                    {agentReport.compliance_notice}
+                  </div>
+                </div>
+              )}
             </div>
           </Section>
 
@@ -369,6 +436,17 @@ function aiTitle(key: string) {
     risk_explanation: "主要风险解释",
     peer_comparison: "同行对比解释",
     dad_version: "爸爸版通俗解释"
+  };
+  return map[key] || key;
+}
+
+function agentSectionTitle(key: string) {
+  const map: Record<string, string> = {
+    market_report: "行情与技术面",
+    news_report: "新闻与公告线索",
+    fundamentals_report: "基本面研究",
+    research_plan: "研究经理摘要",
+    risk_review: "风险审查"
   };
   return map[key] || key;
 }

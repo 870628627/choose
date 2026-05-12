@@ -5,7 +5,7 @@ import os
 import random
 import sys
 from datetime import date, timedelta
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 
 KNOWN_STOCKS: Dict[str, Dict[str, str]] = {
@@ -374,6 +374,88 @@ def sync_one(code: str) -> Dict[str, Any]:
     }
 
 
+def yahoo_a_share_symbol(code: str) -> str:
+    normalized = code.strip().upper()
+    if "." in normalized:
+        return normalized
+    if normalized.startswith("6"):
+        return f"{normalized}.SS"
+    if normalized.startswith(("0", "2", "3")):
+        return f"{normalized}.SZ"
+    return normalized
+
+
+def ensure_tradingagents_credentials(provider: str):
+    provider_key_envs = {
+        "openai": ["OPENAI_API_KEY", "OPENAI_ADMIN_KEY"],
+        "google": ["GOOGLE_API_KEY"],
+        "anthropic": ["ANTHROPIC_API_KEY"],
+        "xai": ["XAI_API_KEY"],
+        "deepseek": ["DEEPSEEK_API_KEY"],
+        "qwen": ["DASHSCOPE_API_KEY"],
+        "qwen-cn": ["DASHSCOPE_CN_API_KEY"],
+        "glm": ["ZHIPU_API_KEY"],
+        "glm-cn": ["ZHIPU_CN_API_KEY"],
+        "minimax": ["MINIMAX_API_KEY"],
+        "minimax-cn": ["MINIMAX_CN_API_KEY"],
+        "openrouter": ["OPENROUTER_API_KEY"],
+        "azure": ["AZURE_OPENAI_API_KEY"]
+    }
+    normalized = provider.lower()
+    if normalized == "ollama":
+        return
+    env_names = provider_key_envs.get(normalized, [])
+    if env_names and not any(os.getenv(name) for name in env_names):
+        joined = " 或 ".join(env_names)
+        raise SystemExit(f"TradingAgents 后端缺少模型密钥。请在启动 choose 后端前设置 {joined}，或写入 server/.env。")
+
+
+def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dict[str, Any]:
+    import contextlib
+
+    os.environ.setdefault("TRADINGAGENTS_OUTPUT_LANGUAGE", "Chinese")
+
+    from tradingagents.default_config import DEFAULT_CONFIG
+    from tradingagents.graph.trading_graph import TradingAgentsGraph
+
+    config = DEFAULT_CONFIG.copy()
+    config["output_language"] = "Chinese"
+    config["max_debate_rounds"] = int(os.getenv("TRADINGAGENTS_WEB_MAX_DEBATE_ROUNDS", "1"))
+    config["max_risk_discuss_rounds"] = int(os.getenv("TRADINGAGENTS_WEB_MAX_RISK_ROUNDS", "1"))
+    ensure_tradingagents_credentials(str(config.get("llm_provider", "openai")))
+
+    analysts = [
+        item.strip()
+        for item in os.getenv("TRADINGAGENTS_WEB_ANALYSTS", "market,news,fundamentals").split(",")
+        if item.strip()
+    ]
+    symbol = yahoo_a_share_symbol(code)
+    report_date = trade_date or date.today().isoformat()
+
+    # Keep stdout as clean JSON for the Node caller; TradingAgents traces and
+    # provider warnings are routed to stderr.
+    with contextlib.redirect_stdout(sys.stderr):
+        graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
+        final_state, decision = graph.propagate(symbol, report_date)
+
+    risk_state = final_state.get("risk_debate_state", {})
+    return {
+        "code": code,
+        "symbol": symbol,
+        "trade_date": report_date,
+        "language": "Chinese",
+        "decision_signal": decision,
+        "sections": {
+            "market_report": final_state.get("market_report", ""),
+            "news_report": final_state.get("news_report", ""),
+            "fundamentals_report": final_state.get("fundamentals_report", ""),
+            "research_plan": final_state.get("investment_plan", ""),
+            "risk_review": risk_state.get("judge_decision", "")
+        },
+        "compliance_notice": "本报告仅用于家庭自用研究、信息整理和复盘，不构成任何投资建议，不提供目标价、涨跌预测或自动交易指令。"
+    }
+
+
 def _to_float(value: Any):
     try:
         if value is None or value == "":
@@ -408,10 +490,12 @@ def main():
         "fetch_daily_metrics",
         "fetch_financials",
         "fetch_announcements",
+        "run_tradingagents_report",
         "sync_all"
     ])
     parser.add_argument("--code")
     parser.add_argument("--codes")
+    parser.add_argument("--trade_date")
     args = parser.parse_args()
 
     os.environ.setdefault("PYTHONUTF8", "1")
@@ -427,6 +511,8 @@ def main():
         emit(fetch_financials(args.code))
     elif args.task == "fetch_announcements":
         emit(fetch_announcements(args.code))
+    elif args.task == "run_tradingagents_report":
+        emit(run_tradingagents_report(args.code, args.trade_date))
     elif args.task == "sync_all":
         codes = [code.strip() for code in (args.codes or "").split(",") if code.strip()]
         emit({"stocks": [sync_one(code) for code in codes]})

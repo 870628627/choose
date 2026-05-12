@@ -2,7 +2,12 @@ import { spawn } from "node:child_process";
 import crypto from "node:crypto";
 import path from "node:path";
 
-export async function runDataWorker<T>(task: string, args: Record<string, string> = {}) {
+type DataWorkerOptions = {
+  timeoutMs?: number;
+  strict?: boolean;
+};
+
+export async function runDataWorker<T>(task: string, args: Record<string, string> = {}, options: DataWorkerOptions = {}) {
   const python = process.env.DATA_WORKER_PYTHON || "python";
   const workerPath = path.resolve(process.cwd(), process.env.DATA_WORKER_PATH || "../data-worker/worker.py");
   const params = [workerPath, task];
@@ -11,7 +16,7 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
     params.push(`--${key}`, value);
   }
 
-  return new Promise<T>((resolve) => {
+  return new Promise<T>((resolve, reject) => {
     const child = spawn(python, params, {
       cwd: process.cwd(),
       env: process.env,
@@ -29,11 +34,23 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
       resolve(payload);
     };
 
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(message));
+    };
+
     const timer = setTimeout(() => {
       child.kill();
-      console.warn(`data-worker ${task} timed out; using fallback`);
+      const message = `data-worker ${task} timed out`;
+      if (options.strict) {
+        fail(message);
+        return;
+      }
+      console.warn(`${message}; using fallback`);
       finish(fallbackWorker(task, args) as T);
-    }, Number(process.env.DATA_WORKER_TIMEOUT_MS || 60000));
+    }, options.timeoutMs ?? Number(process.env.DATA_WORKER_TIMEOUT_MS || 60000));
 
     child.stdout.on("data", (chunk) => {
       stdout += chunk.toString();
@@ -43,11 +60,22 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
       stderr += chunk.toString();
     });
 
-    child.on("error", () => finish(fallbackWorker(task, args) as T));
+    child.on("error", (error) => {
+      if (options.strict) {
+        fail(error.message);
+        return;
+      }
+      finish(fallbackWorker(task, args) as T);
+    });
     child.on("close", (code) => {
       if (settled) return;
       if (code !== 0) {
-        console.warn(stderr || `data-worker exited with code ${code}; using fallback`);
+        const message = stderr || `data-worker exited with code ${code}`;
+        if (options.strict) {
+          fail(message);
+          return;
+        }
+        console.warn(`${message}; using fallback`);
         finish(fallbackWorker(task, args) as T);
         return;
       }
@@ -55,7 +83,12 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
       try {
         finish(JSON.parse(stdout) as T);
       } catch (error) {
-        console.warn(`data-worker returned invalid JSON: ${(error as Error).message}; using fallback`);
+        const message = `data-worker returned invalid JSON: ${(error as Error).message}`;
+        if (options.strict) {
+          fail(`${message}${stderr ? `\n${stderr}` : ""}`);
+          return;
+        }
+        console.warn(`${message}; using fallback`);
         finish(fallbackWorker(task, args) as T);
       }
     });

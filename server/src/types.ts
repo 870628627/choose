@@ -57,3 +57,19 @@ export type AiReport = {
   peer_comparison: string;
   dad_version: string;
 };
+
+export type TradingAgentsReport = {
+  code: string;
+  symbol: string;
+  trade_date: string;
+  language: "Chinese";
+  decision_signal?: unknown;
+  sections: {
+    market_report?: string;
+    news_report?: string;
+    fundamentals_report?: string;
+    research_plan?: string;
+    risk_review?: string;
+  };
+  compliance_notice: string;
+};

@@ -36,6 +36,12 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify({ author, content })
     }),
+  tradingAgentsReport: (code: string) =>
+    request(`/api/stocks/${code}/tradingagents-report`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({})
+    }),
   compare: (codes: string[]) => request(`/api/compare?codes=${codes.join(",")}`),
   risks: () => request("/api/risks"),
   reviews: () => request("/api/reviews"),
