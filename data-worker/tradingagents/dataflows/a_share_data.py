@@ -1,0 +1,150 @@
+import os
+from datetime import datetime
+from typing import Optional
+
+import pandas as pd
+import requests
+
+
+def a_share_code(symbol: str) -> Optional[str]:
+    normalized = symbol.strip().upper()
+    if normalized.endswith((".SS", ".SH", ".SZ")):
+        normalized = normalized[:-3]
+    if len(normalized) == 6 and normalized.isdigit() and normalized[0] in {"0", "2", "3", "6"}:
+        return normalized
+    return None
+
+
+def is_a_share_symbol(symbol: str) -> bool:
+    return a_share_code(symbol) is not None
+
+
+def _column(frame: pd.DataFrame, candidates: list[str]) -> str:
+    for candidate in candidates:
+        if candidate in frame.columns:
+            return candidate
+    normalized = {
+        str(column).strip().lower().replace(" ", "").replace("_", ""): column
+        for column in frame.columns
+    }
+    for candidate in candidates:
+        key = candidate.strip().lower().replace(" ", "").replace("_", "")
+        if key in normalized:
+            return str(normalized[key])
+    raise KeyError(f"missing one of columns: {candidates}")
+
+
+def _eastmoney_secid(code: str) -> str:
+    market = "1" if code.startswith("6") else "0"
+    return f"{market}.{code}"
+
+
+def get_eastmoney_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+
+    response = requests.get(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get",
+        params={
+            "secid": _eastmoney_secid(code),
+            "fields1": "f1,f2,f3,f4,f5,f6",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+            "klt": "101",
+            "fqt": "0",
+            "beg": start_date.replace("-", ""),
+            "end": end_date.replace("-", "")
+        },
+        timeout=15,
+        headers={"User-Agent": "choose-a-share-research/0.1"},
+    )
+    response.raise_for_status()
+    payload = response.json()
+    klines = (payload.get("data") or {}).get("klines") or []
+    if not klines:
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+
+    rows = []
+    for item in klines:
+        fields = str(item).split(",")
+        if len(fields) < 6:
+            continue
+        rows.append({
+            "Date": fields[0],
+            "Open": fields[1],
+            "Close": fields[2],
+            "High": fields[3],
+            "Low": fields[4],
+            "Volume": fields[5],
+        })
+
+    data = pd.DataFrame(rows)
+    data["Adj Close"] = data["Close"]
+    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
+    for column in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data = data.dropna(subset=["Date", "Close"]).sort_values("Date")
+    return data[["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]].reset_index(drop=True)
+
+
+def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+
+    data = get_eastmoney_ohlcv(symbol, start_date, end_date)
+    if not data.empty or not os.getenv("TRADINGAGENTS_A_SHARE_AKSHARE_FALLBACK"):
+        return data
+
+    import akshare as ak  # type: ignore
+
+    raw = ak.stock_zh_a_hist(
+        symbol=code,
+        period="daily",
+        start_date=start_date.replace("-", ""),
+        end_date=end_date.replace("-", ""),
+        adjust=""
+    )
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+
+    date_col = _column(raw, ["日期", "date", "Date"])
+    open_col = _column(raw, ["开盘", "open", "Open"])
+    high_col = _column(raw, ["最高", "high", "High"])
+    low_col = _column(raw, ["最低", "low", "Low"])
+    close_col = _column(raw, ["收盘", "close", "Close"])
+    volume_col = _column(raw, ["成交量", "volume", "Volume"])
+
+    data = pd.DataFrame({
+        "Date": raw[date_col],
+        "Open": raw[open_col],
+        "High": raw[high_col],
+        "Low": raw[low_col],
+        "Close": raw[close_col],
+        "Adj Close": raw[close_col],
+        "Volume": raw[volume_col],
+    })
+    data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
+    for column in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    data = data.dropna(subset=["Date", "Close"]).sort_values("Date")
+    return data.reset_index(drop=True)
+
+
+def format_akshare_stock_data(symbol: str, start_date: str, end_date: str) -> str:
+    data = get_akshare_ohlcv(symbol, start_date, end_date)
+    if data.empty:
+        return f"No AKShare A-share data found for symbol '{symbol}' between {start_date} and {end_date}"
+
+    output = data.copy()
+    for column in ["Open", "High", "Low", "Close", "Adj Close"]:
+        output[column] = output[column].round(2)
+    output["Date"] = output["Date"].dt.strftime("%Y-%m-%d")
+    output = output.set_index("Date")
+
+    header = f"# A-share stock data for {symbol.upper()} from {start_date} to {end_date}\n"
+    header += f"# Source: Eastmoney A-share kline, with optional AKShare fallback\n"
+    header += f"# Total records: {len(output)}\n"
+    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+
+    return header + output.to_csv()

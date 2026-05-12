@@ -4,6 +4,7 @@ from dateutil.relativedelta import relativedelta
 import pandas as pd
 import yfinance as yf
 import os
+from .a_share_data import format_akshare_stock_data, is_a_share_symbol
 from .stockstats_utils import StockstatsUtils, _clean_dataframe, yf_retry, load_ohlcv, filter_financials_by_date
 
 def get_YFin_data_online(
@@ -14,6 +15,12 @@ def get_YFin_data_online(
 
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
+
+    if is_a_share_symbol(symbol):
+        try:
+            return format_akshare_stock_data(symbol, start_date, end_date)
+        except Exception as e:
+            return f"Error retrieving A-share stock data for {symbol}: {str(e)}"
 
     # Create ticker object
     ticker = yf.Ticker(symbol.upper())
@@ -165,6 +172,15 @@ def get_stock_stats_indicators_window(
         
     except Exception as e:
         print(f"Error getting bulk stockstats data: {e}")
+        if is_a_share_symbol(symbol):
+            ind_string = f"Unable to retrieve A-share OHLCV data for {symbol}: {e}\n"
+            result_str = (
+                f"## {indicator} values from {before.strftime('%Y-%m-%d')} to {end_date}:\n\n"
+                + ind_string
+                + "\n\n"
+                + best_ind_params.get(indicator, "No description available.")
+            )
+            return result_str
         # Fallback to original implementation if bulk method fails
         ind_string = ""
         curr_date_dt = datetime.strptime(curr_date, "%Y-%m-%d")
