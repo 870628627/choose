@@ -2,9 +2,11 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
+import { bearerToken, createSession, createUser, requireAuth, revokeSession, verifyUser } from "./auth.js";
 import { db, getStockByCode, listStocks } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
 import { createResearchScore } from "./scoring.js";
+import type { AuthenticatedRequest } from "./auth.js";
 import type { TradingAgentsReport, WorkerStockBasic, WorkerStockPayload } from "./types.js";
 import type { WorkerAnnouncement, WorkerDailyMetric, WorkerFinancialMetric } from "./types.js";
 
@@ -35,9 +37,48 @@ const globalTradingAgentsReportSchema = z.object({
   symbol: z.string().min(1).max(32).regex(/^[A-Za-z0-9._-]+$/),
   trade_date: z.string().min(8).optional()
 });
+const authSchema = z.object({
+  username: z.string().trim().min(3).max(32).regex(/^[A-Za-z0-9_]+$/),
+  password: z.string().min(8).max(128),
+  display_name: z.string().trim().min(1).max(32).optional()
+});
+const loginSchema = authSchema.pick({ username: true, password: true });
 
 function tradingAgentsTimeoutMs() {
   return Number(process.env.TRADINGAGENTS_REPORT_TIMEOUT_MS || 900000);
+}
+
+function assetTypeForSymbol(symbol: string) {
+  const normalized = symbol.trim().toUpperCase();
+  if (/^\d{6}$/.test(normalized) || /^\d{6}\.(SS|SZ|SH)$/.test(normalized)) return "a-share";
+  if (normalized.endsWith("-USD") || normalized.endsWith("-USDT")) return "crypto";
+  return "us";
+}
+
+function saveTradingReport(userId: number, assetType: string, report: TradingAgentsReport, displayName?: string) {
+  const result = db
+    .prepare(
+      `
+      INSERT INTO trading_reports (user_id, asset_type, symbol, display_name, trade_date, report_json)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `
+    )
+    .run(userId, assetType, report.symbol || report.code, displayName || null, report.trade_date, JSON.stringify(report));
+  return Number(result.lastInsertRowid);
+}
+
+function reportRow(row: Record<string, unknown>) {
+  const id = Number(row.id);
+  const report = JSON.parse(String(row.report_json)) as TradingAgentsReport;
+  return {
+    id,
+    asset_type: String(row.asset_type),
+    symbol: String(row.symbol),
+    display_name: row.display_name ? String(row.display_name) : "",
+    trade_date: String(row.trade_date),
+    created_at: String(row.created_at),
+    report: { ...report, record_id: id }
+  };
 }
 
 function upsertStock(basic: WorkerStockBasic) {
@@ -155,6 +196,90 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, service: "alphascope-server" });
 });
 
+app.post("/api/auth/register", (req, res, next) => {
+  try {
+    const body = authSchema.parse(req.body ?? {});
+    const user = createUser(body.username, body.password, body.display_name);
+    if (!user) {
+      res.status(400).json({ error: "注册失败" });
+      return;
+    }
+    const token = createSession(user.id);
+    res.status(201).json({ token, user });
+  } catch (error) {
+    const message = error instanceof Error && error.message.includes("UNIQUE")
+      ? "用户名已存在"
+      : (error as Error).message;
+    next(new Error(message));
+  }
+});
+
+app.post("/api/auth/login", (req, res, next) => {
+  try {
+    const body = loginSchema.parse(req.body ?? {});
+    const user = verifyUser(body.username, body.password);
+    if (!user) {
+      res.status(401).json({ error: "用户名或密码不正确" });
+      return;
+    }
+    const token = createSession(user.id);
+    res.json({ token, user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/auth/logout", requireAuth, (req, res) => {
+  const token = bearerToken(req);
+  if (token) revokeSession(token);
+  res.json({ ok: true });
+});
+
+app.get("/api/auth/me", requireAuth, (req, res) => {
+  res.json({ user: (req as AuthenticatedRequest).user });
+});
+
+app.get("/api/reports", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  const assetType = typeof req.query.asset_type === "string" ? req.query.asset_type : "";
+  const allowedTypes = new Set(["a-share", "us", "crypto"]);
+  const rows = assetType && allowedTypes.has(assetType)
+    ? db
+      .prepare(
+        `
+        SELECT * FROM trading_reports
+        WHERE user_id = ? AND asset_type = ? AND deleted_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+      `
+      )
+      .all(user.id, assetType)
+    : db
+      .prepare(
+        `
+        SELECT * FROM trading_reports
+        WHERE user_id = ? AND deleted_at IS NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+      `
+      )
+      .all(user.id);
+  res.json(rows.map((row) => reportRow(row as Record<string, unknown>)));
+});
+
+app.delete("/api/reports/:id", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  const id = Number(req.params.id);
+  db.prepare(
+    `
+    UPDATE trading_reports
+    SET deleted_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+  `
+  ).run(id, user.id);
+  res.json({ ok: true });
+});
+
 app.get("/api/stocks", (_req, res) => {
   res.json(listStocks().map((item) => withParsedRiskTags(item as Record<string, unknown>)));
 });
@@ -235,9 +360,10 @@ app.post("/api/stocks/:code/notes", (req, res, next) => {
   }
 });
 
-app.post("/api/stocks/:code/tradingagents-report", async (req, res, next) => {
+app.post("/api/stocks/:code/tradingagents-report", requireAuth, async (req, res, next) => {
   try {
-    const stock = getStockByCode(req.params.code) as { id: number; code: string } | undefined;
+    const user = (req as AuthenticatedRequest).user;
+    const stock = getStockByCode(req.params.code) as { id: number; code: string; name?: string } | undefined;
     if (!stock) {
       res.status(404).json({ error: "Stock not found" });
       return;
@@ -251,23 +377,27 @@ app.post("/api/stocks/:code/tradingagents-report", async (req, res, next) => {
       strict: true,
       timeoutMs: tradingAgentsTimeoutMs()
     });
-    res.json(report);
+    const recordId = saveTradingReport(user.id, "a-share", report, stock.name);
+    res.json({ ...report, record_id: recordId });
   } catch (error) {
     next(error);
   }
 });
 
-app.post("/api/tradingagents-report", async (req, res, next) => {
+app.post("/api/tradingagents-report", requireAuth, async (req, res, next) => {
   try {
+    const user = (req as AuthenticatedRequest).user;
     const body = globalTradingAgentsReportSchema.parse(req.body ?? {});
-    const args: Record<string, string> = { code: body.symbol.trim().toUpperCase() };
+    const symbol = body.symbol.trim().toUpperCase();
+    const args: Record<string, string> = { code: symbol };
     if (body.trade_date) args.trade_date = body.trade_date;
 
     const report = await runDataWorker<TradingAgentsReport>("run_tradingagents_report", args, {
       strict: true,
       timeoutMs: tradingAgentsTimeoutMs()
     });
-    res.json(report);
+    const recordId = saveTradingReport(user.id, assetTypeForSymbol(symbol), report);
+    res.json({ ...report, record_id: recordId });
   } catch (error) {
     next(error);
   }

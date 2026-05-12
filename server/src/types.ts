@@ -50,6 +50,7 @@ export type WorkerStockPayload = {
 };
 
 export type TradingAgentsReport = {
+  record_id?: number;
   code: string;
   symbol: string;
   trade_date: string;

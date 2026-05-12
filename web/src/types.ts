@@ -23,6 +23,7 @@ export type StockDetail = {
 };
 
 export type TradingAgentsReport = {
+  record_id?: number;
   code: string;
   symbol: string;
   trade_date: string;
@@ -40,4 +41,25 @@ export type TradingAgentsReport = {
     final_trade_decision?: string;
   };
   risk_notice: string;
+};
+
+export type AuthUser = {
+  id: number;
+  username: string;
+  display_name: string;
+};
+
+export type AuthSession = {
+  token: string;
+  user: AuthUser;
+};
+
+export type ReportRecord = {
+  id: number;
+  asset_type: "a-share" | "us" | "crypto";
+  symbol: string;
+  display_name?: string;
+  trade_date: string;
+  created_at: string;
+  report: TradingAgentsReport;
 };

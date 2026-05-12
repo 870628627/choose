@@ -1,16 +1,25 @@
-import { useEffect, useState } from "react";
+import { type FormEvent, useEffect, useState } from "react";
 import {
+  Activity,
   BarChart3,
   BookOpenText,
+  ChevronDown,
   Download,
+  FileText,
   Home,
+  LockKeyhole,
+  LogIn,
+  LogOut,
   RefreshCw,
   Search,
+  ShieldCheck,
   Sparkles,
-  Trash2
+  Trash2,
+  User,
+  UserPlus
 } from "lucide-react";
-import { api } from "./api";
-import type { StockDetail, StockListItem, TradingAgentsReport } from "./types";
+import { api, getAuthToken, setAuthToken } from "./api";
+import type { AuthSession, ReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
 
 type View = "home" | "a-share" | "us" | "crypto";
 
@@ -20,6 +29,12 @@ const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "us", label: "美股", icon: BarChart3 },
   { id: "crypto", label: "加密", icon: Sparkles }
 ];
+
+const assetTypeLabels: Record<ReportRecord["asset_type"], string> = {
+  "a-share": "A股",
+  us: "美股",
+  crypto: "加密"
+};
 
 const tradingAgentIntroductions = [
   { name: "行情技术 Agent", role: "读取价格、成交量和技术指标，判断趋势、波动和关键价位。" },
@@ -118,8 +133,175 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function AuthLoading() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-[#080b0f] px-4 text-slate-200">
+      <div className="flex items-center gap-3 rounded border border-emerald-400/30 bg-white/5 px-4 py-3">
+        <Activity size={18} className="animate-pulse text-emerald-300" />
+        <span className="text-sm">正在连接 AlphaScope 交易台</span>
+      </div>
+    </div>
+  );
+}
+
+function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession) => void }) {
+  const [mode, setMode] = useState<"login" | "register">("login");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      const normalized = username.trim();
+      const session = mode === "login"
+        ? await api.login(normalized, password)
+        : await api.register(normalized, password, displayName.trim() || undefined);
+      onAuthenticated(session);
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#080b0f] text-slate-100">
+      <div className="absolute inset-0 opacity-30" style={{
+        backgroundImage:
+          "linear-gradient(rgba(16,185,129,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,.12) 1px, transparent 1px)",
+        backgroundSize: "42px 42px"
+      }} />
+      <main className="relative mx-auto grid min-h-screen max-w-6xl gap-8 px-4 py-10 lg:grid-cols-[1.1fr_.9fr] lg:items-center">
+        <section className="space-y-6">
+          <div>
+            <div className="mb-3 inline-flex items-center gap-2 rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-sm text-emerald-200">
+              <ShieldCheck size={16} />
+              私有报告库
+            </div>
+            <h1 className="text-4xl font-semibold tracking-normal text-white sm:text-5xl">AlphaScope 全球资产研究台</h1>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
+              为 A股、美股和加密资产准备的多 Agent 研究工作台。每个账户拥有独立报告记录，登录后即可继续自己的研究线索。
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            {[
+              ["Market", "价格、成交量、技术结构"],
+              ["Research", "新闻、情绪、基本面"],
+              ["Execution", "交易方案、风控复核"]
+            ].map(([label, value]) => (
+              <div key={label} className="rounded border border-white/10 bg-white/[0.04] p-4">
+                <div className="text-xs uppercase tracking-widest text-emerald-300">{label}</div>
+                <div className="mt-2 text-sm leading-6 text-slate-300">{value}</div>
+              </div>
+            ))}
+          </div>
+          <div className="overflow-hidden rounded border border-white/10 bg-black/30">
+            <div className="grid grid-cols-4 border-b border-white/10 px-4 py-2 text-xs uppercase tracking-widest text-slate-500">
+              <span>Symbol</span>
+              <span>Signal</span>
+              <span>Risk</span>
+              <span>Status</span>
+            </div>
+            {[
+              ["NVDA", "Momentum", "Medium", "Reviewing"],
+              ["600519", "Quality", "Low", "Ready"],
+              ["BTC-USD", "Volatility", "High", "Watching"]
+            ].map((row) => (
+              <div key={row[0]} className="grid grid-cols-4 border-b border-white/5 px-4 py-3 text-sm last:border-b-0">
+                <span className="font-mono text-cyan-200">{row[0]}</span>
+                <span className="text-slate-300">{row[1]}</span>
+                <span className={row[2] === "High" ? "text-amber-300" : row[2] === "Low" ? "text-emerald-300" : "text-slate-300"}>{row[2]}</span>
+                <span className="text-slate-400">{row[3]}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded border border-white/10 bg-[#10151d]/95 p-5 shadow-2xl shadow-black/40">
+          <div className="mb-5 flex rounded border border-white/10 bg-black/30 p-1">
+            <button
+              type="button"
+              onClick={() => setMode("login")}
+              className={`flex flex-1 items-center justify-center gap-2 rounded px-3 py-2 text-sm ${
+                mode === "login" ? "bg-emerald-400 text-slate-950" : "text-slate-300"
+              }`}
+            >
+              <LogIn size={16} />
+              登录
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode("register")}
+              className={`flex flex-1 items-center justify-center gap-2 rounded px-3 py-2 text-sm ${
+                mode === "register" ? "bg-emerald-400 text-slate-950" : "text-slate-300"
+              }`}
+            >
+              <UserPlus size={16} />
+              注册
+            </button>
+          </div>
+
+          <form className="space-y-4" onSubmit={submit}>
+            <label className="block">
+              <span className="mb-1 flex items-center gap-2 text-sm text-slate-300"><User size={15} />账号</span>
+              <input
+                value={username}
+                onChange={(event) => setUsername(event.target.value.replace(/[^A-Za-z0-9_]/g, "").slice(0, 32))}
+                autoComplete="username"
+                placeholder="trader_name"
+                className="w-full rounded border border-white/10 bg-black/40 px-3 py-2 text-slate-100 outline-none focus:border-emerald-300"
+              />
+            </label>
+            {mode === "register" && (
+              <label className="block">
+                <span className="mb-1 block text-sm text-slate-300">显示名</span>
+                <input
+                  value={displayName}
+                  onChange={(event) => setDisplayName(event.target.value.slice(0, 32))}
+                  placeholder="你的研究台名称"
+                  className="w-full rounded border border-white/10 bg-black/40 px-3 py-2 text-slate-100 outline-none focus:border-emerald-300"
+                />
+              </label>
+            )}
+            <label className="block">
+              <span className="mb-1 flex items-center gap-2 text-sm text-slate-300"><LockKeyhole size={15} />密码</span>
+              <input
+                value={password}
+                onChange={(event) => setPassword(event.target.value.slice(0, 128))}
+                type="password"
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                placeholder="至少 8 位"
+                className="w-full rounded border border-white/10 bg-black/40 px-3 py-2 text-slate-100 outline-none focus:border-emerald-300"
+              />
+            </label>
+            {error && (
+              <div className="rounded border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm leading-6 text-red-200">
+                {error}
+              </div>
+            )}
+            <button
+              disabled={busy || username.length < 3 || password.length < 8}
+              className="flex w-full items-center justify-center gap-2 rounded border border-emerald-300 bg-emerald-400 px-4 py-2.5 font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {mode === "login" ? <LogIn size={17} /> : <UserPlus size={17} />}
+              {busy ? "处理中" : mode === "login" ? "进入交易台" : "创建账户"}
+            </button>
+          </form>
+        </section>
+      </main>
+    </div>
+  );
+}
+
 export default function App() {
   const [view, setView] = useState<View>("home");
+  const [session, setSession] = useState<AuthSession | null>(null);
+  const [authReady, setAuthReady] = useState(false);
   const [stocks, setStocks] = useState<StockListItem[]>([]);
   const [selectedCode, setSelectedCode] = useState("");
   const [message, setMessage] = useState("");
@@ -131,8 +313,46 @@ export default function App() {
   };
 
   useEffect(() => {
-    loadStocks().catch((error) => setMessage(error.message));
+    const token = getAuthToken();
+    if (!token) {
+      setAuthReady(true);
+      return;
+    }
+    api.me()
+      .then(({ user }) => setSession({ token, user }))
+      .catch(() => {
+        setAuthToken("");
+        setSession(null);
+      })
+      .finally(() => setAuthReady(true));
   }, []);
+
+  useEffect(() => {
+    if (!session) return;
+    loadStocks().catch((error) => setMessage(error.message));
+  }, [session?.user.id]);
+
+  const handleAuthenticated = (nextSession: AuthSession) => {
+    setAuthToken(nextSession.token);
+    setSession(nextSession);
+    setMessage("");
+  };
+
+  const logout = async () => {
+    try {
+      await api.logout();
+    } catch {
+      // 本地清理仍然继续，避免网络抖动把用户困在当前会话。
+    }
+    setAuthToken("");
+    setSession(null);
+    setStocks([]);
+    setSelectedCode("");
+    setView("home");
+  };
+
+  if (!authReady) return <AuthLoading />;
+  if (!session) return <AuthShell onAuthenticated={handleAuthenticated} />;
 
   return (
     <div className="min-h-screen bg-paper pb-20">
@@ -160,6 +380,18 @@ export default function App() {
                 </button>
               );
             })}
+            <div className="flex items-center gap-2 rounded border border-line bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <User size={16} />
+              {session.user.display_name}
+            </div>
+            <button
+              onClick={logout}
+              className="inline-flex items-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+              title="退出登录"
+            >
+              <LogOut size={16} />
+              退出
+            </button>
           </nav>
         </div>
       </header>
@@ -182,6 +414,7 @@ export default function App() {
         )}
         {view === "us" && (
           <AssetReportPage
+            assetType="us"
             title="美股 TradingAgents 报告"
             description="输入美股符号生成中文交易研究报告。"
             placeholder="例如 NVDA、AAPL、MSFT"
@@ -190,6 +423,7 @@ export default function App() {
         )}
         {view === "crypto" && (
           <AssetReportPage
+            assetType="crypto"
             title="加密资产 TradingAgents 报告"
             description="输入加密资产符号生成中文交易研究报告。"
             placeholder="例如 BTC-USD、ETH-USD、SOL-USD"
@@ -229,11 +463,13 @@ function HomeView() {
 }
 
 function AssetReportPage({
+  assetType,
   title,
   description,
   placeholder,
   examples
 }: {
+  assetType: ReportRecord["asset_type"];
   title: string;
   description: string;
   placeholder: string;
@@ -244,6 +480,7 @@ function AssetReportPage({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   useEffect(() => {
     if (!loading) return;
@@ -262,7 +499,9 @@ function AssetReportPage({
     setReport(null);
     setElapsedSeconds(0);
     try {
-      setReport((await api.tradingAgentsSymbolReport(normalized)) as TradingAgentsReport);
+      const nextReport = await api.tradingAgentsSymbolReport(normalized);
+      setReport(nextReport);
+      setHistoryVersion((current) => current + 1);
     } catch (requestError) {
       setError((requestError as Error).message);
     } finally {
@@ -332,6 +571,8 @@ function AssetReportPage({
           {report && <TradingAgentsReportView report={report} onExport={exportReport} />}
         </div>
       </section>
+
+      <ReportHistory assetType={assetType} refreshKey={historyVersion} />
     </div>
   );
 }
@@ -354,6 +595,7 @@ function AShareView({
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState("");
   const [reportElapsedSeconds, setReportElapsedSeconds] = useState(0);
+  const [historyVersion, setHistoryVersion] = useState(0);
 
   const loadDetail = async () => {
     if (!selectedCode) {
@@ -434,7 +676,9 @@ function AShareView({
     setReportError("");
     setReportElapsedSeconds(0);
     try {
-      setReport((await api.tradingAgentsReport(selectedCode)) as TradingAgentsReport);
+      const nextReport = await api.tradingAgentsReport(selectedCode);
+      setReport(nextReport);
+      setHistoryVersion((current) => current + 1);
     } catch (requestError) {
       setReportError((requestError as Error).message);
     } finally {
@@ -621,7 +865,133 @@ function AShareView({
           </Section>
         </>
       )}
+
+      <ReportHistory assetType="a-share" refreshKey={historyVersion} />
     </div>
+  );
+}
+
+function ReportHistory({
+  assetType,
+  refreshKey
+}: {
+  assetType: ReportRecord["asset_type"];
+  refreshKey: number;
+}) {
+  const [records, setRecords] = useState<ReportRecord[]>([]);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadRecords = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const nextRecords = await api.reports(assetType);
+      setRecords(nextRecords);
+      if (expandedId && !nextRecords.some((record) => record.id === expandedId)) {
+        setExpandedId(null);
+      }
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRecords();
+  }, [assetType, refreshKey]);
+
+  const deleteRecord = async (record: ReportRecord) => {
+    const confirmed = window.confirm(`确定删除 ${record.symbol} ${record.trade_date} 的报告记录吗？`);
+    if (!confirmed) return;
+    await api.deleteReport(record.id);
+    setRecords((current) => current.filter((item) => item.id !== record.id));
+    if (expandedId === record.id) setExpandedId(null);
+  };
+
+  const exportRecord = (record: ReportRecord) => {
+    const label = record.display_name || record.symbol;
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.md`;
+    downloadTextFile(name, buildTradingAgentsMarkdown(record.report, record.display_name));
+  };
+
+  return (
+    <Section title={`我的${assetTypeLabels[assetType]}报告记录`}>
+      <div className="rounded border border-line bg-white">
+        <div className="flex flex-col gap-2 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2 text-sm text-slate-600">
+            <FileText size={16} className="text-accent" />
+            <span>{loading ? "正在刷新记录" : `共 ${records.length} 份报告`}</span>
+          </div>
+          <button
+            onClick={loadRecords}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            刷新
+          </button>
+        </div>
+        {error && (
+          <div className="m-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+        {!loading && !records.length && !error && (
+          <div className="px-4 py-8 text-center text-sm text-slate-500">这个账户还没有生成过{assetTypeLabels[assetType]}报告。</div>
+        )}
+        {records.map((record) => {
+          const expanded = expandedId === record.id;
+          return (
+            <article key={record.id} className="border-b border-line last:border-b-0">
+              <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+                <button
+                  onClick={() => setExpandedId(expanded ? null : record.id)}
+                  className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-line bg-slate-50 text-accent">
+                    <ChevronDown size={17} className={expanded ? "rotate-180 transition-transform" : "transition-transform"} />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium text-ink">
+                      {record.display_name ? `${record.display_name} ` : ""}{record.symbol}
+                    </span>
+                    <span className="mt-1 block text-sm text-slate-500">
+                      分析日期 {record.trade_date} ｜ 生成时间 {record.created_at}
+                    </span>
+                  </span>
+                </button>
+                <div className="flex shrink-0 gap-2">
+                  <button
+                    onClick={() => exportRecord(record)}
+                    className="inline-flex items-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
+                  >
+                    <Download size={16} />
+                    导出
+                  </button>
+                  <button
+                    onClick={() => deleteRecord(record)}
+                    className="inline-flex items-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                  >
+                    <Trash2 size={16} />
+                    删除
+                  </button>
+                </div>
+              </div>
+              {expanded && (
+                <div className="border-t border-line bg-slate-50 p-4">
+                  <div className="rounded border border-line bg-white p-4">
+                    <TradingAgentsReportView report={record.report} onExport={() => exportRecord(record)} />
+                  </div>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+    </Section>
   );
 }
 
