@@ -10,3 +10,5 @@ server/data/*.db-*
 storage
 .env
 *.log
+__pycache__
+*.pyc
