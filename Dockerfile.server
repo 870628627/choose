@@ -22,7 +22,8 @@ RUN curl -fsSL "https://npmmirror.com/mirrors/node/v${NODE_VERSION}/node-v${NODE
 
 COPY data-worker/requirements.txt /app/data-worker/requirements.txt
 RUN python3 -m venv /opt/venv \
-  && /opt/venv/bin/pip install --no-cache-dir -r /app/data-worker/requirements.txt
+  && /opt/venv/bin/pip install --no-cache-dir -r /app/data-worker/requirements.txt \
+  && /opt/venv/bin/python -c "import tradingagents; print('tradingagents import ok')"
 
 ENV PATH="/opt/venv/bin:${PATH}" \
   NODE_ENV=production \

@@ -33,5 +33,6 @@ jobs:
             cd /opt/choose
             git fetch origin main
             git reset --hard origin/main
-            docker compose up -d --build
+            docker compose build --no-cache server
+            docker compose up -d --build --force-recreate
             docker image prune -f

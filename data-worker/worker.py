@@ -415,8 +415,16 @@ def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dic
 
     os.environ.setdefault("TRADINGAGENTS_OUTPUT_LANGUAGE", "Chinese")
 
-    from tradingagents.default_config import DEFAULT_CONFIG
-    from tradingagents.graph.trading_graph import TradingAgentsGraph
+    try:
+        from tradingagents.default_config import DEFAULT_CONFIG
+        from tradingagents.graph.trading_graph import TradingAgentsGraph
+    except ModuleNotFoundError as error:
+        if error.name == "tradingagents":
+            raise SystemExit(
+                "TradingAgents 依赖未安装到当前后端容器。请确认已部署包含 data-worker/requirements.txt "
+                "中 tradingagents Git 依赖的最新镜像，并重新构建 server 容器。"
+            )
+        raise
 
     config = DEFAULT_CONFIG.copy()
     config["output_language"] = "Chinese"
