@@ -5,6 +5,7 @@ import path from "node:path";
 type DataWorkerOptions = {
   timeoutMs?: number;
   strict?: boolean;
+  signal?: AbortSignal;
 };
 
 export type DataWorkerEvent = {
@@ -154,6 +155,17 @@ export async function runDataWorkerEvents(
       fail(`data-worker ${task} timed out`);
     }, options.timeoutMs ?? Number(process.env.DATA_WORKER_TIMEOUT_MS || 60000));
 
+    const abort = () => {
+      child.kill();
+      fail(`data-worker ${task} cancelled`);
+    };
+
+    if (options.signal?.aborted) {
+      abort();
+      return;
+    }
+    options.signal?.addEventListener("abort", abort, { once: true });
+
     child.stdout.on("data", (chunk) => {
       stdoutBuffer += chunk.toString();
       let newlineIndex = stdoutBuffer.indexOf("\n");
@@ -175,6 +187,7 @@ export async function runDataWorkerEvents(
 
     child.on("close", (code) => {
       if (settled) return;
+      options.signal?.removeEventListener("abort", abort);
       if (stdoutBuffer.trim()) parseLine(stdoutBuffer);
       if (settled) return;
       if (code !== 0) {

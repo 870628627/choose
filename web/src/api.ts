@@ -66,6 +66,12 @@ export const api = {
   reportJobs: (assetType?: ReportRecord["asset_type"]) =>
     request<ReportJob[]>(assetType ? `/api/report-jobs?asset_type=${encodeURIComponent(assetType)}` : "/api/report-jobs"),
   reportJob: (id: number) => request<ReportJob>(`/api/report-jobs/${id}`),
+  cancelReportJob: (id: number) =>
+    request<ReportJob>(`/api/report-jobs/${id}/cancel`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({})
+    }),
   deleteReport: (id: number) =>
     request<{ ok: true }>(`/api/reports/${id}`, {
       method: "DELETE"

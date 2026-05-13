@@ -2,7 +2,7 @@ import { db } from "./db.js";
 import { runDataWorkerEvents, type DataWorkerEvent } from "./dataWorker.js";
 import type { TradingAgentsReport } from "./types.js";
 
-type ReportJobStatus = "queued" | "running" | "completed" | "failed";
+type ReportJobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
 
 type ReportJobRow = {
   id: number;
@@ -38,6 +38,7 @@ const sectionSpecs = [
 
 const sectionByKey = new Map(sectionSpecs.map((section) => [section.key, section]));
 const runningJobIds = new Set<number>();
+const runningControllers = new Map<number, AbortController>();
 
 function maxConcurrentJobs() {
   return Math.max(1, Number(process.env.TRADINGAGENTS_MAX_CONCURRENT_JOBS || 1));
@@ -161,6 +162,45 @@ export function listReportJobsForUser(userId: number, assetType?: string) {
       .all(userId);
 
   return rows.map((row) => buildJobSnapshot(row as ReportJobRow));
+}
+
+export function cancelReportJobForUser(jobId: number, userId: number) {
+  const row = db.prepare("SELECT * FROM report_jobs WHERE id = ? AND user_id = ?").get(jobId, userId) as ReportJobRow | undefined;
+  if (!row) return null;
+
+  if (row.status === "queued") {
+    db.prepare(
+      `
+      UPDATE report_jobs
+      SET status = 'cancelled',
+          current_stage = '已停止',
+          error = '用户停止了报告生成。',
+          completed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'queued'
+    `
+    ).run(jobId);
+    setTimeout(pumpReportQueue, 0);
+    return getReportJobForUser(jobId, userId);
+  }
+
+  if (row.status === "running") {
+    db.prepare(
+      `
+      UPDATE report_jobs
+      SET status = 'cancelled',
+          current_stage = '已停止',
+          error = '用户停止了报告生成，已生成的分段内容已保留。',
+          completed_at = CURRENT_TIMESTAMP,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = ? AND status = 'running'
+    `
+    ).run(jobId);
+    runningControllers.get(jobId)?.abort();
+    return getReportJobForUser(jobId, userId);
+  }
+
+  return buildJobSnapshot(row);
 }
 
 export function createReportJob(input: {
@@ -304,6 +344,9 @@ function persistReportSections(jobId: number, report: TradingAgentsReport) {
 }
 
 function handleWorkerEvent(row: ReportJobRow, event: DataWorkerEvent) {
+  const latest = db.prepare("SELECT status FROM report_jobs WHERE id = ?").get(row.id) as { status: string } | undefined;
+  if (latest?.status !== "running") return;
+
   if (event.type === "stage") {
     const stage = String(event.title || event.stage || row.current_stage || "运行中");
     updateJobStage(row.id, stage, clampProgress(event.percent, 5));
@@ -339,11 +382,14 @@ function handleWorkerEvent(row: ReportJobRow, event: DataWorkerEvent) {
 }
 
 async function runReportJob(row: ReportJobRow) {
+  const controller = new AbortController();
+  runningControllers.set(row.id, controller);
   try {
     const args: Record<string, string> = { code: row.code };
     if (row.trade_date) args.trade_date = row.trade_date;
     await runDataWorkerEvents("run_tradingagents_report_events", args, (event) => handleWorkerEvent(row, event), {
-      timeoutMs: tradingAgentsTimeoutMs()
+      timeoutMs: tradingAgentsTimeoutMs(),
+      signal: controller.signal
     });
 
     const latest = db.prepare("SELECT status FROM report_jobs WHERE id = ?").get(row.id) as { status: string } | undefined;
@@ -351,6 +397,8 @@ async function runReportJob(row: ReportJobRow) {
       throw new Error("报告 worker 结束但没有返回完成事件。");
     }
   } catch (error) {
+    const latest = db.prepare("SELECT status FROM report_jobs WHERE id = ?").get(row.id) as { status: string } | undefined;
+    if (latest?.status === "cancelled") return;
     db.prepare(
       `
       UPDATE report_jobs
@@ -362,5 +410,7 @@ async function runReportJob(row: ReportJobRow) {
       WHERE id = ? AND status = 'running'
     `
     ).run((error as Error).message.slice(0, 4000), row.id);
+  } finally {
+    runningControllers.delete(row.id);
   }
 }

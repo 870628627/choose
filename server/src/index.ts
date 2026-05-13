@@ -5,7 +5,7 @@ import { z } from "zod";
 import { bearerToken, createSession, createUser, requireAuth, revokeSession, verifyUser } from "./auth.js";
 import { addUserStock, db, getStockByCode, getUserStockByCode, listStocks, listUserStockCodes, removeUserStock } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
-import { createReportJob, getReportJobForUser, initializeReportJobQueue, listReportJobsForUser } from "./reportJobs.js";
+import { cancelReportJobForUser, createReportJob, getReportJobForUser, initializeReportJobQueue, listReportJobsForUser } from "./reportJobs.js";
 import { createResearchScore } from "./scoring.js";
 import type { AuthenticatedRequest } from "./auth.js";
 import type { TradingAgentsReport, WorkerStockBasic, WorkerStockPayload } from "./types.js";
@@ -273,6 +273,16 @@ app.get("/api/report-jobs", requireAuth, (req, res) => {
 app.get("/api/report-jobs/:id", requireAuth, (req, res) => {
   const user = (req as AuthenticatedRequest).user;
   const job = getReportJobForUser(Number(req.params.id), user.id);
+  if (!job) {
+    res.status(404).json({ error: "Report job not found" });
+    return;
+  }
+  res.json(job);
+});
+
+app.post("/api/report-jobs/:id/cancel", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  const job = cancelReportJobForUser(Number(req.params.id), user.id);
   if (!job) {
     res.status(404).json({ error: "Report job not found" });
     return;

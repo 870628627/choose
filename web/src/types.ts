@@ -82,7 +82,7 @@ export type ReportJob = {
   symbol: string;
   display_name?: string;
   trade_date: string;
-  status: "queued" | "running" | "completed" | "failed";
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
   progress_percent: number;
   current_stage: string;
   error?: string;

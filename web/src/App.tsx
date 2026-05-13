@@ -14,6 +14,7 @@ import {
   Search,
   ShieldCheck,
   Sparkles,
+  Square,
   Trash2,
   User,
   UserPlus
@@ -507,6 +508,9 @@ function AssetReportPage({
         } else if (nextJob.status === "failed") {
           setError(nextJob.error || "报告生成失败");
           setLoading(false);
+        } else if (nextJob.status === "cancelled") {
+          setError(nextJob.error || "已停止生成");
+          setLoading(false);
         }
       } catch (requestError) {
         if (!cancelled) {
@@ -545,6 +549,19 @@ function AssetReportPage({
     if (!report) return;
     const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.md`;
     downloadTextFile(name, buildTradingAgentsMarkdown(report));
+  };
+
+  const stopReport = async () => {
+    if (!job) return;
+    try {
+      const nextJob = await api.cancelReportJob(job.id);
+      setJob(nextJob);
+      setError(nextJob.error || "已停止生成");
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -595,6 +612,17 @@ function AssetReportPage({
             <p className="text-sm leading-6 text-slate-600">输入符号后即可生成 TradingAgents 中文报告。</p>
           )}
           {loading && <TradingAgentsProgress elapsedSeconds={elapsedSeconds} job={job} />}
+          {loading && job && (
+            <div className="mt-4">
+              <button
+                onClick={stopReport}
+                className="inline-flex items-center gap-2 rounded border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+              >
+                <Square size={15} />
+                停止生成
+              </button>
+            </div>
+          )}
           {error && (
             <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
               {error}
@@ -668,6 +696,9 @@ function AShareView({
           setReportLoading(false);
         } else if (nextJob.status === "failed") {
           setReportError(nextJob.error || "报告生成失败");
+          setReportLoading(false);
+        } else if (nextJob.status === "cancelled") {
+          setReportError(nextJob.error || "已停止生成");
           setReportLoading(false);
         }
       } catch (requestError) {
@@ -755,6 +786,19 @@ function AShareView({
     if (!report || !detail) return;
     const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.md`;
     downloadTextFile(name, buildTradingAgentsMarkdown(report, detail.stock.name));
+  };
+
+  const stopTradingAgents = async () => {
+    if (!reportJob) return;
+    try {
+      const nextJob = await api.cancelReportJob(reportJob.id);
+      setReportJob(nextJob);
+      setReportError(nextJob.error || "已停止生成");
+    } catch (requestError) {
+      setReportError((requestError as Error).message);
+    } finally {
+      setReportLoading(false);
+    }
   };
 
   return (
@@ -912,6 +956,12 @@ function AShareView({
                 <Sparkles size={16} />
                 {reportLoading ? "生成中" : "生成 TradingAgents 报告"}
               </button>
+              {reportLoading && reportJob && (
+                <button onClick={stopTradingAgents} className="inline-flex items-center gap-2 rounded border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50">
+                  <Square size={15} />
+                  停止生成
+                </button>
+              )}
             </div>
           </Section>
 
@@ -921,6 +971,17 @@ function AShareView({
                 <p className="text-sm leading-6 text-slate-600">点击上方按钮后生成 A 股中文交易研究报告。</p>
               )}
               {reportLoading && <TradingAgentsProgress elapsedSeconds={reportElapsedSeconds} job={reportJob} />}
+              {reportLoading && reportJob && (
+                <div className="mt-4">
+                  <button
+                    onClick={stopTradingAgents}
+                    className="inline-flex items-center gap-2 rounded border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
+                  >
+                    <Square size={15} />
+                    停止生成
+                  </button>
+                </div>
+              )}
               {reportError && (
                 <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
                   {reportError}
@@ -1028,6 +1089,11 @@ function ReportHistory({
     downloadTextFile(name, buildTradingAgentsMarkdown(record.report, record.display_name));
   };
 
+  const stopJob = async (job: ReportJob) => {
+    const nextJob = await api.cancelReportJob(job.id);
+    setJobs((current) => current.map((item) => item.id === nextJob.id ? nextJob : item));
+  };
+
   return (
     <Section title={`我的${assetTypeLabels[assetType]}报告记录`}>
       <div className="rounded border border-line bg-white">
@@ -1061,18 +1127,37 @@ function ReportHistory({
                   {job.display_name ? `${job.display_name} ` : ""}{job.symbol} · 任务 #{job.id}
                 </div>
                 <div className="mt-1 text-sm text-slate-500">
-                  {job.status === "queued" ? `排队中，第 ${job.queue_position || 1} 位` : job.status === "running" ? job.current_stage : "生成失败"}
+                  {job.status === "queued"
+                    ? `排队中，第 ${job.queue_position || 1} 位`
+                    : job.status === "running"
+                      ? job.current_stage
+                      : job.status === "cancelled"
+                        ? "已停止"
+                        : "生成失败"}
                 </div>
               </div>
-              <span className={`rounded border px-2 py-1 text-xs ${
-                job.status === "failed"
-                  ? "border-red-200 bg-red-50 text-red-700"
-                  : job.status === "queued"
-                    ? "border-amber-200 bg-amber-50 text-amber-800"
-                    : "border-emerald-200 bg-emerald-50 text-emerald-700"
-              }`}>
-                {job.status === "failed" ? "失败" : job.status === "queued" ? "排队中" : "生成中"}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                {(job.status === "queued" || job.status === "running") && (
+                  <button
+                    onClick={() => stopJob(job)}
+                    className="inline-flex items-center gap-1 rounded border border-red-200 bg-white px-2 py-1 text-xs text-red-700 hover:bg-red-50"
+                  >
+                    <Square size={13} />
+                    停止
+                  </button>
+                )}
+                <span className={`rounded border px-2 py-1 text-xs ${
+                  job.status === "failed"
+                    ? "border-red-200 bg-red-50 text-red-700"
+                    : job.status === "cancelled"
+                      ? "border-slate-200 bg-white text-slate-600"
+                      : job.status === "queued"
+                        ? "border-amber-200 bg-amber-50 text-amber-800"
+                        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                }`}>
+                  {job.status === "failed" ? "失败" : job.status === "cancelled" ? "已停止" : job.status === "queued" ? "排队中" : "生成中"}
+                </span>
+              </div>
             </div>
             <div className="h-2 overflow-hidden rounded bg-white">
               <div className="h-full rounded bg-accent" style={{ width: `${Math.max(3, Math.min(100, job.progress_percent))}%` }} />
