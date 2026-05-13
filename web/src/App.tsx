@@ -93,8 +93,27 @@ function safeFileName(value: string) {
 
 function waitForFrameLoad(frame: HTMLIFrameElement) {
   return new Promise<void>((resolve) => {
-    frame.onload = () => resolve();
+    let resolved = false;
+    const finish = () => {
+      if (resolved) return;
+      resolved = true;
+      resolve();
+    };
+    frame.onload = finish;
+    window.setTimeout(finish, 1200);
   });
+}
+
+function downloadBlob(filename: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
 async function downloadTradingAgentsPdf(filename: string, report: TradingAgentsReport, stockName?: string) {
@@ -109,7 +128,6 @@ async function downloadTradingAgentsPdf(filename: string, report: TradingAgentsR
   frame.style.width = "1180px";
   frame.style.height = "1200px";
   frame.style.border = "0";
-  frame.style.opacity = "0";
   frame.style.pointerEvents = "none";
 
   const ready = waitForFrameLoad(frame);
@@ -130,43 +148,74 @@ async function downloadTradingAgentsPdf(filename: string, report: TradingAgentsR
     await new Promise((resolve) => window.setTimeout(resolve, 250));
 
     const shell = frameDocument.querySelector(".shell") as HTMLElement | null;
-    const target = shell || frameDocument.body;
+    let blocks = Array.from(frameDocument.querySelectorAll(".hero, .toc, .section, .risk")) as HTMLElement[];
+    if (blocks.length === 0) blocks = [frameDocument.body];
     const height = Math.max(
-      target.scrollHeight,
+      shell?.scrollHeight || 0,
       frameDocument.documentElement.scrollHeight,
       frameDocument.body.scrollHeight
     );
     frame.style.height = `${height + 80}px`;
 
-    const canvas = await html2canvas(target, {
-      backgroundColor: "#f4f7f8",
-      scale: Math.min(window.devicePixelRatio || 1, 1.5),
-      useCORS: true,
-      windowWidth: 1180,
-      windowHeight: height + 80
-    });
-
     const pdf = new jsPDF("p", "mm", "a4");
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
     const margin = 8;
+    const gap = 5;
     const imgWidth = pageWidth - margin * 2;
-    const imgHeight = (canvas.height * imgWidth) / canvas.width;
-    let position = margin;
-    let remainingHeight = imgHeight;
-    const image = canvas.toDataURL("image/jpeg", 0.92);
+    let cursorY = margin;
 
-    pdf.addImage(image, "JPEG", margin, position, imgWidth, imgHeight);
-    remainingHeight -= pageHeight - margin * 2;
+    const addCanvasToPdf = (canvas: HTMLCanvasElement, forceNewPage: boolean) => {
+      if (forceNewPage && cursorY > margin) {
+        pdf.addPage();
+        cursorY = margin;
+      }
 
-    while (remainingHeight > 0) {
-      position = remainingHeight - imgHeight + margin;
-      pdf.addPage();
-      pdf.addImage(image, "JPEG", margin, position, imgWidth, imgHeight);
-      remainingHeight -= pageHeight - margin * 2;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const image = canvas.toDataURL("image/jpeg", 0.92);
+      let remainingHeight = imgHeight;
+      let consumedHeight = 0;
+
+      while (remainingHeight > 0) {
+        const availableHeight = pageHeight - margin - cursorY;
+        if (availableHeight < 24) {
+          pdf.addPage();
+          cursorY = margin;
+          continue;
+        }
+
+        pdf.addImage(image, "JPEG", margin, cursorY - consumedHeight, imgWidth, imgHeight);
+        const pageSliceHeight = Math.min(availableHeight, remainingHeight);
+        remainingHeight -= pageSliceHeight;
+        consumedHeight += pageSliceHeight;
+
+        if (remainingHeight > 0) {
+          pdf.addPage();
+          cursorY = margin;
+        } else {
+          cursorY += pageSliceHeight + gap;
+          if (cursorY > pageHeight - margin - 12) {
+            pdf.addPage();
+            cursorY = margin;
+          }
+        }
+      }
+    };
+
+    for (let index = 0; index < blocks.length; index += 1) {
+      const block = blocks[index];
+      const canvas = await html2canvas(block, {
+        backgroundColor: "#f4f7f8",
+        scale: Math.min(window.devicePixelRatio || 1, 1.5),
+        useCORS: true,
+        windowWidth: 1180,
+        windowHeight: Math.max(block.scrollHeight + 40, 800)
+      });
+      if (!canvas.width || !canvas.height) continue;
+      addCanvasToPdf(canvas, block.classList.contains("section") || block.classList.contains("risk"));
     }
 
-    pdf.save(filename);
+    downloadBlob(filename, pdf.output("blob"));
   } finally {
     frame.remove();
   }
@@ -386,9 +435,9 @@ function ReportMarkdown({ content }: { content: string }) {
 
 function AuthLoading() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#080b0f] px-4 text-slate-200">
-      <div className="flex items-center gap-3 rounded border border-emerald-400/30 bg-white/5 px-4 py-3">
-        <Activity size={18} className="animate-pulse text-emerald-300" />
+    <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4 text-slate-700">
+      <div className="flex items-center gap-3 rounded border border-line bg-white px-4 py-3 shadow-sm">
+        <Activity size={18} className="animate-pulse text-accent" />
         <span className="text-sm">正在连接 AlphaScope 交易台</span>
       </div>
     </div>
@@ -420,21 +469,21 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
   };
 
   return (
-    <div className="min-h-screen bg-[#080b0f] text-slate-100">
-      <div className="absolute inset-0 opacity-30" style={{
+    <div className="min-h-screen bg-slate-50 text-ink">
+      <div className="absolute inset-0 opacity-70" style={{
         backgroundImage:
-          "linear-gradient(rgba(16,185,129,.18) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,.12) 1px, transparent 1px)",
+          "linear-gradient(rgba(15,118,110,.08) 1px, transparent 1px), linear-gradient(90deg, rgba(14,165,233,.08) 1px, transparent 1px)",
         backgroundSize: "42px 42px"
       }} />
       <main className="relative mx-auto grid min-h-screen max-w-6xl gap-8 px-4 py-10 lg:grid-cols-[1.1fr_.9fr] lg:items-center">
         <section className="space-y-6">
           <div>
-            <div className="mb-3 inline-flex items-center gap-2 rounded border border-emerald-400/30 bg-emerald-400/10 px-3 py-1 text-sm text-emerald-200">
+            <div className="mb-3 inline-flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-1 text-sm text-accent">
               <ShieldCheck size={16} />
               私有报告库
             </div>
-            <h1 className="text-4xl font-semibold tracking-normal text-white sm:text-5xl">AlphaScope 全球资产研究台</h1>
-            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-300">
+            <h1 className="text-4xl font-semibold tracking-normal text-ink sm:text-5xl">AlphaScope 全球资产研究台</h1>
+            <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
               为 A股、美股和加密资产准备的多 Agent 研究工作台。每个账户拥有独立报告记录，登录后即可继续自己的研究线索。
             </p>
           </div>
@@ -444,14 +493,14 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
               ["Research", "新闻、情绪、基本面"],
               ["Execution", "交易方案、风控复核"]
             ].map(([label, value]) => (
-              <div key={label} className="rounded border border-white/10 bg-white/[0.04] p-4">
-                <div className="text-xs uppercase tracking-widest text-emerald-300">{label}</div>
-                <div className="mt-2 text-sm leading-6 text-slate-300">{value}</div>
+              <div key={label} className="rounded border border-line bg-white p-4 shadow-sm">
+                <div className="text-xs uppercase tracking-widest text-accent">{label}</div>
+                <div className="mt-2 text-sm leading-6 text-slate-600">{value}</div>
               </div>
             ))}
           </div>
-          <div className="overflow-hidden rounded border border-white/10 bg-black/30">
-            <div className="grid grid-cols-4 border-b border-white/10 px-4 py-2 text-xs uppercase tracking-widest text-slate-500">
+          <div className="overflow-hidden rounded border border-line bg-white shadow-sm">
+            <div className="grid grid-cols-4 border-b border-line bg-slate-100 px-4 py-2 text-xs uppercase tracking-widest text-slate-500">
               <span>Symbol</span>
               <span>Signal</span>
               <span>Risk</span>
@@ -462,23 +511,23 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
               ["600519", "Quality", "Low", "Ready"],
               ["BTC-USD", "Volatility", "High", "Watching"]
             ].map((row) => (
-              <div key={row[0]} className="grid grid-cols-4 border-b border-white/5 px-4 py-3 text-sm last:border-b-0">
-                <span className="font-mono text-cyan-200">{row[0]}</span>
-                <span className="text-slate-300">{row[1]}</span>
-                <span className={row[2] === "High" ? "text-amber-300" : row[2] === "Low" ? "text-emerald-300" : "text-slate-300"}>{row[2]}</span>
-                <span className="text-slate-400">{row[3]}</span>
+              <div key={row[0]} className="grid grid-cols-4 border-b border-line px-4 py-3 text-sm last:border-b-0">
+                <span className="font-mono text-sky-700">{row[0]}</span>
+                <span className="text-slate-700">{row[1]}</span>
+                <span className={row[2] === "High" ? "text-amber-700" : row[2] === "Low" ? "text-emerald-700" : "text-slate-700"}>{row[2]}</span>
+                <span className="text-slate-500">{row[3]}</span>
               </div>
             ))}
           </div>
         </section>
 
-        <section className="rounded border border-white/10 bg-[#10151d]/95 p-5 shadow-2xl shadow-black/40">
-          <div className="mb-5 flex rounded border border-white/10 bg-black/30 p-1">
+        <section className="rounded border border-line bg-white p-5 shadow-xl shadow-slate-200/80">
+          <div className="mb-5 flex rounded border border-line bg-slate-100 p-1">
             <button
               type="button"
               onClick={() => setMode("login")}
               className={`flex flex-1 items-center justify-center gap-2 rounded px-3 py-2 text-sm ${
-                mode === "login" ? "bg-emerald-400 text-slate-950" : "text-slate-300"
+                mode === "login" ? "bg-white text-accent shadow-sm" : "text-slate-600 hover:text-ink"
               }`}
             >
               <LogIn size={16} />
@@ -488,7 +537,7 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
               type="button"
               onClick={() => setMode("register")}
               className={`flex flex-1 items-center justify-center gap-2 rounded px-3 py-2 text-sm ${
-                mode === "register" ? "bg-emerald-400 text-slate-950" : "text-slate-300"
+                mode === "register" ? "bg-white text-accent shadow-sm" : "text-slate-600 hover:text-ink"
               }`}
             >
               <UserPlus size={16} />
@@ -498,35 +547,35 @@ function AuthShell({ onAuthenticated }: { onAuthenticated: (session: AuthSession
 
           <form className="space-y-4" onSubmit={submit}>
             <label className="block">
-              <span className="mb-1 flex items-center gap-2 text-sm text-slate-300"><User size={15} />邮箱</span>
+              <span className="mb-1 flex items-center gap-2 text-sm text-slate-600"><User size={15} />邮箱</span>
               <input
                 value={email}
                 onChange={(event) => setEmail(event.target.value.trim().slice(0, 254))}
                 type="email"
                 autoComplete="username"
                 placeholder="trader@example.com"
-                className="w-full rounded border border-white/10 bg-black/40 px-3 py-2 text-slate-100 outline-none focus:border-emerald-300"
+                className="w-full rounded border border-line bg-white px-3 py-2 text-ink outline-none focus:border-accent focus:ring-2 focus:ring-emerald-100"
               />
             </label>
             <label className="block">
-              <span className="mb-1 flex items-center gap-2 text-sm text-slate-300"><LockKeyhole size={15} />密码</span>
+              <span className="mb-1 flex items-center gap-2 text-sm text-slate-600"><LockKeyhole size={15} />密码</span>
               <input
                 value={password}
                 onChange={(event) => setPassword(event.target.value.slice(0, 128))}
                 type="password"
                 autoComplete={mode === "login" ? "current-password" : "new-password"}
                 placeholder="至少 8 位"
-                className="w-full rounded border border-white/10 bg-black/40 px-3 py-2 text-slate-100 outline-none focus:border-emerald-300"
+                className="w-full rounded border border-line bg-white px-3 py-2 text-ink outline-none focus:border-accent focus:ring-2 focus:ring-emerald-100"
               />
             </label>
             {error && (
-              <div className="rounded border border-red-400/30 bg-red-400/10 px-3 py-2 text-sm leading-6 text-red-200">
+              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
                 {error}
               </div>
             )}
             <button
               disabled={busy || !email.includes("@") || password.length < 8}
-              className="flex w-full items-center justify-center gap-2 rounded border border-emerald-300 bg-emerald-400 px-4 py-2.5 font-medium text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded border border-accent bg-accent px-4 py-2.5 font-medium text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {mode === "login" ? <LogIn size={17} /> : <UserPlus size={17} />}
               {busy ? "处理中" : mode === "login" ? "进入交易台" : "创建账户"}
@@ -729,7 +778,7 @@ function HomeView() {
   const exportShowcaseReport = (record: ShowcaseReportRecord) => {
     const label = record.display_name || record.symbol;
     const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.pdf`;
-    void exportTradingAgentsPdf(name, record.report, record.display_name);
+    return exportTradingAgentsPdf(name, record.report, record.display_name);
   };
 
   return (
@@ -1155,7 +1204,7 @@ function AssetReportPage({
   const exportReport = () => {
     if (!report) return;
     const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.pdf`;
-    void exportTradingAgentsPdf(name, report);
+    return exportTradingAgentsPdf(name, report);
   };
 
   const stopReport = async () => {
@@ -1433,7 +1482,7 @@ function AShareView({
   const exportReport = () => {
     if (!report || !detail) return;
     const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.pdf`;
-    void exportTradingAgentsPdf(name, report, detail.stock.name);
+    return exportTradingAgentsPdf(name, report, detail.stock.name);
   };
 
   const stopTradingAgents = async () => {
@@ -1749,7 +1798,7 @@ function ReportHistory({
   const exportRecord = (record: ReportRecord) => {
     const label = record.display_name || record.symbol;
     const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.pdf`;
-    void exportTradingAgentsPdf(name, record.report, record.display_name);
+    return exportTradingAgentsPdf(name, record.report, record.display_name);
   };
 
   const stopJob = async (job: ReportJob) => {
@@ -1886,7 +1935,7 @@ function ReportHistory({
                     className="inline-flex items-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
                   >
                     <Download size={16} />
-                    导出
+                    导出PDF
                   </button>
                   <button
                     onClick={() => deleteRecord(record)}
@@ -1912,8 +1961,19 @@ function ReportHistory({
   );
 }
 
-function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsReport; onExport: () => void }) {
+function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsReport; onExport: () => void | Promise<void> }) {
   const sectionEntries = Object.entries(report.sections).filter(([, value]) => Boolean(value?.trim()));
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await onExport();
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -1929,12 +1989,13 @@ function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsRe
             </div>
           </div>
           <button
-            onClick={onExport}
-            className="inline-flex items-center justify-center gap-2 rounded border border-emerald-300/40 bg-emerald-300 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-200"
-            title="导出报告"
+            onClick={handleExport}
+            disabled={exporting}
+            className="inline-flex items-center justify-center gap-2 rounded border border-emerald-300/40 bg-emerald-300 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-70"
+            title="导出 PDF"
           >
-            <Download size={16} />
-            导出报告
+            {exporting ? <Activity size={16} className="animate-pulse" /> : <Download size={16} />}
+            {exporting ? "生成 PDF 中" : "导出 PDF"}
           </button>
         </div>
       </div>
