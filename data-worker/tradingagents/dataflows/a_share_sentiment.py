@@ -56,6 +56,7 @@ _DISCUSSION_TERMS = (
 
 @dataclass
 class PageCandidate:
+    platform: str
     source: str
     url: str
 
@@ -83,7 +84,7 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
 
 
-def _safe_fetch(url: str, timeout: float = 5.0) -> str:
+def _safe_fetch(url: str, timeout: float = 3.0) -> str:
     try:
         response = requests.get(url, headers=_HEADERS, timeout=timeout)
         response.raise_for_status()
@@ -143,19 +144,21 @@ def _direct_candidates(code: str) -> list[PageCandidate]:
     symbol = f"{_market_prefix(code)}{code}"
     lower_symbol = symbol.lower()
     return [
-        PageCandidate("东方财富股吧", f"https://guba.eastmoney.com/list,{code}.html"),
-        PageCandidate("东方财富股吧", f"https://mguba.eastmoney.com/mguba/list/{code}"),
-        PageCandidate("雪球", f"https://xueqiu.com/S/{symbol}"),
-        PageCandidate("雪球", f"https://ai.xueqiu.com/S/{symbol}"),
-        PageCandidate("同花顺", f"https://stockpage.10jqka.com.cn/{code}/"),
-        PageCandidate("同花顺股吧", f"https://guba.10jqka.com.cn/{lower_symbol}/"),
+        PageCandidate("eastmoney", "东方财富股吧", f"https://guba.eastmoney.com/list,{code}.html"),
+        PageCandidate("eastmoney", "东方财富股吧移动页", f"https://mguba.eastmoney.com/mguba/list/{code}"),
+        PageCandidate("xueqiu", "雪球个股页", f"https://xueqiu.com/S/{symbol}"),
+        PageCandidate("xueqiu", "雪球 AI/个股页", f"https://ai.xueqiu.com/S/{symbol}"),
+        PageCandidate("tonghuashun", "同花顺个股页", f"https://stockpage.10jqka.com.cn/{code}/"),
+        PageCandidate("tonghuashun", "同花顺股吧", f"https://guba.10jqka.com.cn/{lower_symbol}/"),
     ]
 
 
-def _scan_direct_pages(code: str, terms: list[str]) -> list[str]:
+def _scan_direct_pages(code: str, terms: list[str], platform: str) -> list[str]:
     fragment_blocks = []
     reachable_blocks = []
     for candidate in _direct_candidates(code):
+        if candidate.platform != platform:
+            continue
         html = _safe_fetch(candidate.url)
         title, text = _extract_page_text(html)
         fragments = _fragments(text, terms)
@@ -174,10 +177,10 @@ def _scan_direct_pages(code: str, terms: list[str]) -> list[str]:
             fragment_blocks.append("\n".join(lines))
         else:
             reachable_blocks.append("\n".join(lines))
-        if len(fragment_blocks) >= 4:
+        if len(fragment_blocks) >= 2:
             break
         time.sleep(0.25)
-    return (fragment_blocks + reachable_blocks)[:4]
+    return (fragment_blocks + reachable_blocks)[:2]
 
 
 def _bing_search(query: str, timeout: float = 5.0) -> list[dict[str, str]]:
@@ -195,19 +198,29 @@ def _bing_search(query: str, timeout: float = 5.0) -> list[dict[str, str]]:
     return results
 
 
-def _scan_search_snippets(code: str, alias: str) -> list[str]:
+def _platform_search_queries(platform: str, code: str, alias: str) -> list[str]:
     terms = " ".join(part for part in [code, alias, "A股 股吧 讨论 情绪"] if part)
-    queries = [
-        f"{terms} site:guba.eastmoney.com",
-        f"{terms} site:mguba.eastmoney.com",
-        f"{terms} site:xueqiu.com",
-        f"{terms} site:10jqka.com.cn",
-        f"{terms} site:guba.10jqka.com.cn",
-    ]
+    if platform == "eastmoney":
+        return [
+            f"{terms} site:guba.eastmoney.com",
+        ]
+    if platform == "xueqiu":
+        return [
+            f"{terms} site:xueqiu.com",
+        ]
+    if platform == "tonghuashun":
+        return [
+            f"{terms} site:guba.10jqka.com.cn",
+        ]
+    return [terms]
+
+
+def _scan_platform_search_snippets(platform: str, code: str, alias: str) -> list[str]:
+    queries = _platform_search_queries(platform, code, alias)
     blocks = []
     seen_hosts = set()
     for query in queries:
-        results = _bing_search(query)
+        results = _bing_search(query, timeout=3.0)
         if not results:
             continue
         lines = [f"### 搜索摘要：{query}"]
@@ -223,10 +236,39 @@ def _scan_search_snippets(code: str, alias: str) -> list[str]:
                 break
         if used:
             blocks.append("\n".join(lines))
-        if len(blocks) >= 4:
+        if len(blocks) >= 2:
             break
         time.sleep(0.3)
     return blocks
+
+
+def _platform_title(platform: str) -> str:
+    return {
+        "eastmoney": "东方财富股吧",
+        "xueqiu": "雪球讨论",
+        "tonghuashun": "同花顺讨论",
+    }.get(platform, platform)
+
+
+def _platform_block(platform: str, code: str, alias: str, terms: list[str], api_block: str = "") -> str:
+    direct_blocks = _scan_direct_pages(code, terms, platform)
+    has_useful_direct_fragments = any("Relevant public-page fragments:" in block for block in direct_blocks)
+    search_blocks = [] if has_useful_direct_fragments else _scan_platform_search_snippets(platform, code, alias)
+    lines = [f"## {_platform_title(platform)}"]
+    if api_block:
+        lines.extend(["", "### API / structured fetch", api_block])
+    if direct_blocks:
+        lines.append("\n### Public pages")
+        lines.extend(direct_blocks)
+    if search_blocks:
+        lines.append("\n### Search snippets")
+        lines.extend(search_blocks)
+    if not api_block and not direct_blocks and not search_blocks:
+        lines.append(
+            "<no usable public snippets found; source may require login, block crawlers, "
+            "or have no recent indexed discussion for this symbol>"
+        )
+    return "\n\n".join(lines)
 
 
 def fetch_eastmoney_guba_posts(symbol: str, limit: int = 30) -> str:
@@ -270,25 +312,15 @@ def fetch_a_share_public_discussion(symbol: str, limit: int = 30) -> str:
 
     alias = _alias(code)
     terms = [code, alias, f"{_market_prefix(code)}{code}", *_DISCUSSION_TERMS]
-    eastmoney_block = fetch_eastmoney_guba_posts(symbol, limit=limit)
-    direct_blocks = _scan_direct_pages(code, terms)
-    search_blocks = [] if len(direct_blocks) >= 3 else _scan_search_snippets(code, alias)
+    eastmoney_api_block = fetch_eastmoney_guba_posts(symbol, limit=limit)
 
     lines = [
         f"A-share public discussion scan for {code}{f' / {alias}' if alias else ''}",
-        "Scope: public pages and search snippets only; no login-only comments, no captcha bypass.",
-        "\n## Eastmoney Guba API / AKShare",
-        eastmoney_block,
+        "Scope: Eastmoney Guba, Xueqiu, and Tonghuashun public pages/search snippets only; no login-only comments, no captcha bypass.",
+        "Source policy: output is grouped by platform so the analyst can judge data breadth instead of treating Eastmoney as the only signal.",
+        "",
+        _platform_block("eastmoney", code, alias, terms, api_block=eastmoney_api_block),
+        _platform_block("xueqiu", code, alias, terms),
+        _platform_block("tonghuashun", code, alias, terms),
     ]
-    if direct_blocks:
-        lines.append("\n## Public pages")
-        lines.extend(direct_blocks)
-    if search_blocks:
-        lines.append("\n## Search snippets")
-        lines.extend(search_blocks)
-    if not direct_blocks and not search_blocks and eastmoney_block.startswith("<"):
-        lines.append(
-            f"\n<no A-share public discussion snippets found for {code}; "
-            "searched Eastmoney Guba, Xueqiu, Tonghuashun and Bing snippets>"
-        )
     return "\n\n".join(lines)

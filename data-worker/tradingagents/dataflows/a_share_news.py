@@ -305,9 +305,10 @@ def get_a_share_news(ticker: str, start_date: str, end_date: str, limit: int = 1
     lines = [
         f"## A-share News Scan for {code}{f' / {name}' if name else ''}",
         f"Date window requested by agent: {start_date} to {end_date}",
-        "Scope: public announcements, Chinese finance pages, and search snippets; no login-only feeds or captcha bypass.",
+        "Scope: public announcements, AKShare/Eastmoney announcement data, Chinese finance pages, and search snippets; no login-only feeds or captcha bypass.",
+        "Announcement source policy: use the fast Eastmoney public announcement endpoint first; fall back to the AKShare announcement helper when that direct endpoint is unavailable.",
         "",
-        "## Public Announcements",
+        "## Public Announcements / AKShare-compatible Eastmoney data",
         *_format_announcements(code, start_date, end_date, limit=min(limit, 10)),
     ]
     if direct_blocks:

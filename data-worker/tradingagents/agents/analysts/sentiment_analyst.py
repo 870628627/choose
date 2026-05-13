@@ -65,7 +65,7 @@ def create_sentiment_analyst(llm):
             news_block = (
                 get_news.func(ticker, start_date, end_date)
                 if _env_enabled("TRADINGAGENTS_ENABLE_SENTIMENT_YFINANCE_NEWS")
-                else "<sentiment news prefetch disabled; A-share discussion uses Eastmoney Guba>"
+                else "<sentiment news prefetch disabled; A-share discussion uses Eastmoney Guba, Xueqiu, and Tonghuashun>"
             )
             discussion_block = fetch_a_share_public_discussion(ticker, limit=30)
             system_message = _build_a_share_system_message(
