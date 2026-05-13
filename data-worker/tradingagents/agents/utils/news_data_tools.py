@@ -1,5 +1,7 @@
 from langchain_core.tools import tool
 from typing import Annotated, Optional
+from tradingagents.dataflows.a_share_data import is_a_share_symbol
+from tradingagents.dataflows.a_share_news import get_a_share_news
 from tradingagents.dataflows.interface import route_to_vendor
 
 @tool
@@ -18,6 +20,8 @@ def get_news(
     Returns:
         str: A formatted string containing news data
     """
+    if is_a_share_symbol(ticker):
+        return get_a_share_news(ticker, start_date, end_date)
     return route_to_vendor("get_news", ticker, start_date, end_date)
 
 @tool

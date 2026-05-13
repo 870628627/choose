@@ -1,5 +1,12 @@
 from langchain_core.tools import tool
 from typing import Annotated
+from tradingagents.dataflows.a_share_data import is_a_share_symbol
+from tradingagents.dataflows.a_share_fundamentals import (
+    get_a_share_balance_sheet,
+    get_a_share_cashflow,
+    get_a_share_fundamentals,
+    get_a_share_income_statement,
+)
 from tradingagents.dataflows.interface import route_to_vendor
 
 
@@ -17,6 +24,8 @@ def get_fundamentals(
     Returns:
         str: A formatted report containing comprehensive fundamental data
     """
+    if is_a_share_symbol(ticker):
+        return get_a_share_fundamentals(ticker, curr_date)
     return route_to_vendor("get_fundamentals", ticker, curr_date)
 
 
@@ -36,6 +45,8 @@ def get_balance_sheet(
     Returns:
         str: A formatted report containing balance sheet data
     """
+    if is_a_share_symbol(ticker):
+        return get_a_share_balance_sheet(ticker, freq, curr_date)
     return route_to_vendor("get_balance_sheet", ticker, freq, curr_date)
 
 
@@ -55,6 +66,8 @@ def get_cashflow(
     Returns:
         str: A formatted report containing cash flow statement data
     """
+    if is_a_share_symbol(ticker):
+        return get_a_share_cashflow(ticker, freq, curr_date)
     return route_to_vendor("get_cashflow", ticker, freq, curr_date)
 
 
@@ -74,4 +87,6 @@ def get_income_statement(
     Returns:
         str: A formatted report containing income statement data
     """
+    if is_a_share_symbol(ticker):
+        return get_a_share_income_statement(ticker, freq, curr_date)
     return route_to_vendor("get_income_statement", ticker, freq, curr_date)
