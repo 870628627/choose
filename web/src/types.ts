@@ -9,6 +9,8 @@ export type StockListItem = {
   close_price?: number;
   pe_ttm?: number;
   pb?: number;
+  ps?: number;
+  turnover_rate?: number;
   market_cap?: number;
   total_score?: number;
   risk_tags: string[];
@@ -77,6 +79,13 @@ export type ReportRecord = {
   trade_date: string;
   created_at: string;
   report: TradingAgentsReport;
+};
+
+export type ShowcaseReportRecord = ReportRecord & {
+  owner_email?: string;
+  is_showcased: boolean;
+  showcase_id?: number | null;
+  showcased_at?: string;
 };
 
 export type ReportJobSection = {

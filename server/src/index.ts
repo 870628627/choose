@@ -46,6 +46,9 @@ const loginSchema = authSchema;
 const adminUserUpdateSchema = z.object({
   account_level: z.enum(["regular", "vip"])
 });
+const showcaseToggleSchema = z.object({
+  showcased: z.boolean()
+});
 
 function assetTypeForSymbol(symbol: string) {
   const normalized = symbol.trim().toUpperCase();
@@ -65,6 +68,16 @@ function reportRow(row: Record<string, unknown>) {
     trade_date: String(row.trade_date),
     created_at: String(row.created_at),
     report: { ...report, record_id: id }
+  };
+}
+
+function showcasedReportRow(row: Record<string, unknown>) {
+  return {
+    ...reportRow(row),
+    owner_email: row.owner_email ? String(row.owner_email) : "",
+    is_showcased: Boolean(row.showcase_id),
+    showcase_id: row.showcase_id ? Number(row.showcase_id) : null,
+    showcased_at: row.showcased_at ? String(row.showcased_at) : ""
   };
 }
 
@@ -320,6 +333,102 @@ app.patch("/api/admin/users/:id", requireAuth, requireSuperAdmin, (req, res, nex
       )
       .get(id) as Record<string, unknown>;
     res.json(adminUserRow(row));
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/showcase-reports", requireAuth, (_req, res) => {
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        tr.*,
+        rs.id AS showcase_id,
+        rs.created_at AS showcased_at
+      FROM report_showcase rs
+      JOIN trading_reports tr ON tr.id = rs.report_id
+      WHERE tr.deleted_at IS NULL
+      ORDER BY rs.sort_order ASC, rs.created_at DESC
+      LIMIT 12
+    `
+    )
+    .all() as Array<Record<string, unknown>>;
+  res.json(rows.map(showcasedReportRow));
+});
+
+app.get("/api/admin/report-showcase", requireAuth, requireSuperAdmin, (_req, res) => {
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        tr.*,
+        u.email AS owner_email,
+        rs.id AS showcase_id,
+        rs.created_at AS showcased_at
+      FROM trading_reports tr
+      JOIN users u ON u.id = tr.user_id
+      LEFT JOIN report_showcase rs ON rs.report_id = tr.id
+      WHERE tr.deleted_at IS NULL
+      ORDER BY
+        CASE WHEN rs.id IS NULL THEN 1 ELSE 0 END,
+        rs.created_at DESC,
+        tr.created_at DESC,
+        tr.id DESC
+      LIMIT 120
+    `
+    )
+    .all() as Array<Record<string, unknown>>;
+  res.json(rows.map(showcasedReportRow));
+});
+
+app.patch("/api/admin/report-showcase/:id", requireAuth, requireSuperAdmin, (req, res, next) => {
+  try {
+    const user = (req as AuthenticatedRequest).user;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "报告 ID 不正确" });
+      return;
+    }
+    const body = showcaseToggleSchema.parse(req.body ?? {});
+    const report = db
+      .prepare("SELECT id FROM trading_reports WHERE id = ? AND deleted_at IS NULL")
+      .get(id) as Record<string, unknown> | undefined;
+    if (!report) {
+      res.status(404).json({ error: "报告不存在或已删除" });
+      return;
+    }
+    if (body.showcased) {
+      const orderRow = db.prepare("SELECT coalesce(max(sort_order), 0) + 10 AS next_order FROM report_showcase").get() as { next_order: number };
+      db
+        .prepare(
+          `
+          INSERT INTO report_showcase (report_id, sort_order, created_by, updated_at)
+          VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+          ON CONFLICT(report_id) DO UPDATE SET
+            updated_at = CURRENT_TIMESTAMP
+        `
+        )
+        .run(id, orderRow.next_order, user.id);
+    } else {
+      db.prepare("DELETE FROM report_showcase WHERE report_id = ?").run(id);
+    }
+    const row = db
+      .prepare(
+        `
+        SELECT
+          tr.*,
+          u.email AS owner_email,
+          rs.id AS showcase_id,
+          rs.created_at AS showcased_at
+        FROM trading_reports tr
+        JOIN users u ON u.id = tr.user_id
+        LEFT JOIN report_showcase rs ON rs.report_id = tr.id
+        WHERE tr.id = ?
+      `
+      )
+      .get(id) as Record<string, unknown>;
+    res.json(showcasedReportRow(row));
   } catch (error) {
     next(error);
   }

@@ -51,6 +51,19 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash);
     CREATE INDEX IF NOT EXISTS idx_trading_reports_user_created ON trading_reports(user_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS report_showcase (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      report_id INTEGER NOT NULL UNIQUE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_by INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(report_id) REFERENCES trading_reports(id) ON DELETE CASCADE,
+      FOREIGN KEY(created_by) REFERENCES users(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_report_showcase_order ON report_showcase(sort_order, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS report_jobs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,

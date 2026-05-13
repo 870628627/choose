@@ -73,6 +73,8 @@ export function listStocks(userId?: number) {
           dm.close_price,
           dm.pe_ttm,
           dm.pb,
+          dm.ps,
+          dm.turnover_rate,
           dm.market_cap,
           rs.total_score,
           rs.risk_tags
@@ -106,6 +108,8 @@ export function listStocks(userId?: number) {
         dm.close_price,
         dm.pe_ttm,
         dm.pb,
+        dm.ps,
+        dm.turnover_rate,
         dm.market_cap,
         rs.total_score,
         rs.risk_tags

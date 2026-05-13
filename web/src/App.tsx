@@ -20,7 +20,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { api, getAuthToken, setAuthToken } from "./api";
-import type { AdminUser, AuthSession, ReportJob, ReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
+import type { AdminUser, AuthSession, ReportJob, ReportRecord, ShowcaseReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
 
 type View = "home" | "a-share" | "us" | "crypto" | "admin";
 
@@ -75,6 +75,16 @@ function formatNumber(value: unknown, digits = 2) {
   const number = Number(value);
   if (Number.isNaN(number)) return String(value);
   return number.toFixed(digits);
+}
+
+function formatCompactNumber(value: unknown) {
+  if (value === null || value === undefined || value === "") return "-";
+  const number = Number(value);
+  if (Number.isNaN(number)) return String(value);
+  const abs = Math.abs(number);
+  if (abs >= 100000000) return `${(number / 100000000).toFixed(1)}亿`;
+  if (abs >= 10000) return `${(number / 10000).toFixed(1)}万`;
+  return number.toFixed(0);
 }
 
 function safeFileName(value: string) {
@@ -614,6 +624,36 @@ export default function App() {
 }
 
 function HomeView() {
+  const [showcaseReports, setShowcaseReports] = useState<ShowcaseReportRecord[]>([]);
+  const [expandedReportId, setExpandedReportId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const loadShowcaseReports = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const reports = await api.showcaseReports();
+      setShowcaseReports(reports);
+      if (!expandedReportId && reports[0]) setExpandedReportId(reports[0].id);
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadShowcaseReports();
+  }, []);
+
+  const expandedReport = showcaseReports.find((record) => record.id === expandedReportId);
+  const exportShowcaseReport = (record: ShowcaseReportRecord) => {
+    const label = record.display_name || record.symbol;
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.md`;
+    downloadTextFile(name, buildTradingAgentsMarkdown(record.report, record.display_name));
+  };
+
   return (
     <div>
       <section className="border-b border-line pb-5">
@@ -632,15 +672,81 @@ function HomeView() {
           ))}
         </div>
       </section>
+
+      <Section title="报告展厅">
+        <div className="rounded border border-line bg-white">
+          <div className="flex flex-col gap-2 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-ink">精选研究报告</div>
+              <p className="mt-1 text-sm text-slate-600">由管理员从历史报告中挑选展示，方便快速查看报告样式和分析深度。</p>
+            </div>
+            <button
+              onClick={loadShowcaseReports}
+              disabled={loading}
+              className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+              刷新
+            </button>
+          </div>
+          {error && (
+            <div className="m-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          {!loading && !showcaseReports.length && !error && (
+            <div className="px-4 py-8 text-center text-sm text-slate-500">
+              暂无展示报告。管理员可在后台管理里选择历史报告加入展厅。
+            </div>
+          )}
+          {showcaseReports.length > 0 && (
+            <div className="grid gap-4 p-4 lg:grid-cols-[320px_1fr]">
+              <div className="space-y-2">
+                {showcaseReports.map((record) => (
+                  <button
+                    key={record.id}
+                    onClick={() => setExpandedReportId(record.id)}
+                    className={`w-full rounded border p-3 text-left ${
+                      expandedReportId === record.id
+                        ? "border-accent bg-teal-50"
+                        : "border-line bg-slate-50 hover:border-accent"
+                    }`}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="font-mono text-sm font-semibold text-accent">{record.symbol}</span>
+                      <span className="rounded border border-line bg-white px-2 py-1 text-xs text-slate-600">
+                        {assetTypeLabels[record.asset_type]}
+                      </span>
+                    </div>
+                    <div className="truncate text-sm font-medium text-ink">{record.display_name || record.symbol}</div>
+                    <div className="mt-1 text-xs text-slate-500">分析日期 {record.trade_date}</div>
+                  </button>
+                ))}
+              </div>
+              <div className="min-w-0 rounded border border-line bg-white p-4">
+                {expandedReport ? (
+                  <TradingAgentsReportView report={expandedReport.report} onExport={() => exportShowcaseReport(expandedReport)} />
+                ) : (
+                  <p className="text-sm text-slate-500">选择左侧报告查看详情。</p>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      </Section>
     </div>
   );
 }
 
 function AdminView() {
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [reports, setReports] = useState<ShowcaseReportRecord[]>([]);
   const [loading, setLoading] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
   const [savingUserId, setSavingUserId] = useState<number | null>(null);
+  const [savingReportId, setSavingReportId] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const [reportError, setReportError] = useState("");
 
   const loadUsers = async () => {
     setLoading(true);
@@ -654,8 +760,21 @@ function AdminView() {
     }
   };
 
+  const loadReports = async () => {
+    setReportLoading(true);
+    setReportError("");
+    try {
+      setReports(await api.adminShowcaseReports());
+    } catch (requestError) {
+      setReportError((requestError as Error).message);
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
   useEffect(() => {
     loadUsers();
+    loadReports();
   }, []);
 
   const updateLevel = async (user: AdminUser, level: AdminUser["account_level"]) => {
@@ -669,6 +788,19 @@ function AdminView() {
       setError((requestError as Error).message);
     } finally {
       setSavingUserId(null);
+    }
+  };
+
+  const toggleShowcase = async (record: ShowcaseReportRecord) => {
+    setSavingReportId(record.id);
+    setReportError("");
+    try {
+      const updated = await api.toggleShowcaseReport(record.id, !record.is_showcased);
+      setReports((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (requestError) {
+      setReportError((requestError as Error).message);
+    } finally {
+      setSavingReportId(null);
     }
   };
 
@@ -765,6 +897,91 @@ function AdminView() {
                 {loading && (
                   <tr>
                     <td colSpan={7} className="text-center text-slate-500">正在加载用户...</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Section>
+
+      <Section title="报告展厅管理">
+        <div className="rounded border border-line bg-white">
+          <div className="flex flex-col gap-2 border-b border-line px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-semibold text-ink">历史报告展示控制</div>
+              <p className="mt-1 text-sm text-slate-600">选择历史报告加入首页展厅；取消展示不会删除原报告。</p>
+            </div>
+            <button
+              onClick={loadReports}
+              disabled={reportLoading}
+              className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
+            >
+              <RefreshCw size={16} className={reportLoading ? "animate-spin" : ""} />
+              刷新报告
+            </button>
+          </div>
+          {reportError && (
+            <div className="m-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {reportError}
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>报告</th>
+                  <th>类型</th>
+                  <th>归属用户</th>
+                  <th>分析日期</th>
+                  <th>生成时间</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reports.map((record) => (
+                  <tr key={record.id} className={record.is_showcased ? "bg-teal-50" : "hover:bg-slate-50"}>
+                    <td>
+                      <div className="font-medium text-ink">{record.display_name || record.symbol}</div>
+                      <div className="mt-1 font-mono text-xs text-slate-500">{record.symbol}</div>
+                    </td>
+                    <td>{assetTypeLabels[record.asset_type]}</td>
+                    <td className="font-mono text-xs text-slate-600">{record.owner_email || "-"}</td>
+                    <td>{record.trade_date}</td>
+                    <td>{record.created_at}</td>
+                    <td>
+                      <span className={`rounded border px-2 py-1 text-xs ${
+                        record.is_showcased
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                          : "border-line bg-slate-50 text-slate-600"
+                      }`}>
+                        {record.is_showcased ? "首页展示中" : "未展示"}
+                      </span>
+                    </td>
+                    <td>
+                      <button
+                        onClick={() => toggleShowcase(record)}
+                        disabled={savingReportId === record.id}
+                        className={`inline-flex items-center justify-center rounded border px-3 py-2 text-sm disabled:opacity-50 ${
+                          record.is_showcased
+                            ? "border-line bg-white text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                            : "border-accent bg-accent text-white hover:bg-teal-700"
+                        }`}
+                      >
+                        {savingReportId === record.id ? "处理中" : record.is_showcased ? "取消展示" : "展示到首页"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+                {!reportLoading && !reports.length && (
+                  <tr>
+                    <td colSpan={7} className="text-center text-slate-500">暂无历史报告。生成报告后可在这里选择展示。</td>
+                  </tr>
+                )}
+                {reportLoading && (
+                  <tr>
+                    <td colSpan={7} className="text-center text-slate-500">正在加载报告...</td>
                   </tr>
                 )}
               </tbody>
@@ -963,6 +1180,8 @@ function AShareView({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<StockDetail | null>(null);
+  const [detailCache, setDetailCache] = useState<Record<string, StockDetail>>({});
+  const [detailLoading, setDetailLoading] = useState(false);
   const [report, setReport] = useState<TradingAgentsReport | null>(null);
   const [reportJob, setReportJob] = useState<ReportJob | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
@@ -970,12 +1189,24 @@ function AShareView({
   const [reportElapsedSeconds, setReportElapsedSeconds] = useState(0);
   const [historyVersion, setHistoryVersion] = useState(0);
 
-  const loadDetail = async () => {
-    if (!selectedCode) {
+  const fetchAndCacheDetail = async (codeToLoad: string) => {
+    const nextDetail = (await api.getStock(codeToLoad)) as StockDetail;
+    setDetailCache((current) => ({ ...current, [codeToLoad]: nextDetail }));
+    return nextDetail;
+  };
+
+  const loadDetail = async (codeToLoad = selectedCode) => {
+    if (!codeToLoad) {
       setDetail(null);
       return;
     }
-    setDetail((await api.getStock(selectedCode)) as StockDetail);
+    setDetailLoading(true);
+    try {
+      const nextDetail = await fetchAndCacheDetail(codeToLoad);
+      setDetail(nextDetail);
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -983,7 +1214,34 @@ function AShareView({
     setReportJob(null);
     setReportError("");
     setReportElapsedSeconds(0);
-    loadDetail().catch(() => setDetail(null));
+    if (!selectedCode) {
+      setDetail(null);
+      setDetailLoading(false);
+      return;
+    }
+    const cached = detailCache[selectedCode];
+    if (cached) {
+      setDetail(cached);
+      setDetailLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setDetail(null);
+    setDetailLoading(true);
+    fetchAndCacheDetail(selectedCode)
+      .then((nextDetail) => {
+        if (!cancelled) setDetail(nextDetail);
+      })
+      .catch(() => {
+        if (!cancelled) setDetail(null);
+      })
+      .finally(() => {
+        if (!cancelled) setDetailLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [selectedCode]);
 
   useEffect(() => {
@@ -1061,7 +1319,7 @@ function AShareView({
     try {
       await api.sync(selectedCode);
       await reloadStocks();
-      await loadDetail();
+      await loadDetail(selectedCode);
     } finally {
       setBusy(false);
     }
@@ -1072,7 +1330,7 @@ function AShareView({
     try {
       await api.sync();
       await reloadStocks();
-      await loadDetail();
+      if (selectedCode) await loadDetail(selectedCode);
     } finally {
       setBusy(false);
     }
@@ -1181,9 +1439,13 @@ function AShareView({
                 <th>代码</th>
                 <th>名称</th>
                 <th>行业</th>
+                <th>最新日期</th>
                 <th>收盘价</th>
                 <th>PE_TTM</th>
                 <th>PB</th>
+                <th>PS</th>
+                <th>换手率</th>
+                <th>市值</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -1197,9 +1459,13 @@ function AShareView({
                   </td>
                   <td>{stock.name}</td>
                   <td>{stock.industry || "-"}</td>
+                  <td>{stock.latest_trade_date || "-"}</td>
                   <td>{formatNumber(stock.close_price)}</td>
                   <td>{formatNumber(stock.pe_ttm)}</td>
                   <td>{formatNumber(stock.pb)}</td>
+                  <td>{formatNumber(stock.ps)}</td>
+                  <td>{stock.turnover_rate === null || stock.turnover_rate === undefined ? "-" : `${formatNumber(stock.turnover_rate)}%`}</td>
+                  <td>{formatCompactNumber(stock.market_cap)}</td>
                   <td>
                     <div className="flex gap-2">
                       <button
@@ -1225,7 +1491,7 @@ function AShareView({
               ))}
               {!stocks.length && (
                 <tr>
-                  <td colSpan={7} className="text-center text-slate-500">先添加一只 A 股开始研究。</td>
+                  <td colSpan={11} className="text-center text-slate-500">先添加一只 A 股开始研究。</td>
                 </tr>
               )}
             </tbody>
@@ -1233,9 +1499,23 @@ function AShareView({
         </div>
       </Section>
 
+      {detailLoading && !detail && (
+        <Section title="当前自选详情">
+          <div className="rounded border border-line bg-white p-4 text-sm text-slate-600">
+            正在加载 {selectedCode} 的详情...
+          </div>
+        </Section>
+      )}
+
       {detail && (
         <>
           <Section title="当前自选详情">
+            {detailLoading && (
+              <div className="mb-3 inline-flex items-center gap-2 rounded border border-line bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                <RefreshCw size={14} className="animate-spin" />
+                正在刷新详情
+              </div>
+            )}
             <div className="grid gap-4 md:grid-cols-[1.4fr_.9fr]">
               <div className="rounded border border-line bg-white p-4">
                 <h2 className="text-xl font-semibold">
