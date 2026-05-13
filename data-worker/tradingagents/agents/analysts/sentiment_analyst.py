@@ -29,6 +29,7 @@ from tradingagents.agents.utils.agent_utils import (
 )
 from tradingagents.dataflows.a_share_data import is_a_share_symbol
 from tradingagents.dataflows.a_share_sentiment import fetch_eastmoney_guba_posts
+from tradingagents.dataflows.finnhub_sentiment import fetch_finnhub_social_sentiment
 from tradingagents.dataflows.reddit import fetch_reddit_posts
 from tradingagents.dataflows.stocktwits import fetch_stocktwits_messages
 
@@ -65,6 +66,7 @@ def create_sentiment_analyst(llm):
                 guba_block=guba_block,
             )
         else:
+            finnhub_block = fetch_finnhub_social_sentiment(ticker, start_date, end_date)
             stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
             reddit_block = fetch_reddit_posts(ticker)
 
@@ -72,6 +74,7 @@ def create_sentiment_analyst(llm):
                 ticker=ticker,
                 start_date=start_date,
                 end_date=end_date,
+                finnhub_block=finnhub_block,
                 news_block=news_block,
                 stocktwits_block=stocktwits_block,
                 reddit_block=reddit_block,
@@ -113,6 +116,7 @@ def _build_system_message(
     ticker: str,
     start_date: str,
     end_date: str,
+    finnhub_block: str,
     news_block: str,
     stocktwits_block: str,
     reddit_block: str,
@@ -121,6 +125,13 @@ def _build_system_message(
     return f"""You are a financial market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}, drawing on three complementary data sources that have already been collected for you.
 
 ## Data sources (pre-fetched, in this prompt)
+
+### Finnhub social sentiment — preferred structured provider
+Aggregated social sentiment signal. Prefer this section when it contains real rows because it comes from a normal API rather than direct public-site scraping.
+
+<start_of_finnhub_social_sentiment>
+{finnhub_block}
+<end_of_finnhub_social_sentiment>
 
 ### News headlines — Yahoo Finance, past 7 days
 Institutional framing. Fact-driven, slower-moving signal.
@@ -145,28 +156,30 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 ## How to analyze this data (best practices)
 
-1. **Read the StockTwits Bullish/Bearish ratio as a leading retail-sentiment signal.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
+1. **Use Finnhub as the preferred social-sentiment signal when available.** Evaluate mention counts, positive/negative mentions, and net score direction. Sample size matters — a strong score with very few mentions is weak evidence.
 
-2. **Look for cross-source divergences.** If news framing is bearish but StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
+2. **Read the StockTwits Bullish/Bearish ratio as a direct retail-sentiment supplement.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
 
-3. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
+3. **Look for cross-source divergences.** If news framing is bearish but Finnhub/StockTwits is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
 
-4. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
+4. **Weight Reddit posts by engagement.** A 400-upvote / 200-comment thread reflects community attention; a 3-upvote post is noise. Read the body excerpts for context — the title alone often misleads.
 
-5. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
+5. **Distinguish opinion from event.** A news headline ("Nvidia announces $500M Corning deal") is an event; a StockTwits post ("buying NVDA, this is going to moon") is opinion. Both are inputs but should be weighted differently in your conclusions.
 
-6. **Be honest about data limits.** If StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this caveat explicitly. If the sources are silent on a given subreddit, say so.
+6. **Identify recurring narrative themes.** What topic keeps coming up across sources? That's the dominant narrative driving current sentiment.
 
-7. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
+7. **Be honest about data limits.** If Finnhub is unavailable, StockTwits returned only a handful of messages, or one or more sources returned an "<unavailable>" placeholder, the sentiment read is less robust — flag this caveat explicitly. If the sources are silent on a given subreddit, say so.
 
-8. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
+8. **Identify catalysts and risks** that emerge across sources — news of upcoming earnings, product launches, competitive threats, macro headlines, etc.
+
+9. **Past sentiment is not predictive.** Frame your conclusions as signal for the trader to weigh alongside fundamentals and technicals, not as a price call.
 
 ## Output
 
 Produce a sentiment report covering, in order:
 
 1. **Overall sentiment direction** — Bullish / Bearish / Neutral / Mixed — with a brief confidence note based on data quality and sample size.
-2. **Source-by-source breakdown** — what each of news / StockTwits / Reddit is telling you, with specific evidence (cite message counts, ratios, notable posts).
+2. **Source-by-source breakdown** — what each of Finnhub / news / StockTwits / Reddit is telling you, with specific evidence (cite mention counts, scores, ratios, notable posts).
 3. **Divergences, alignments, and key narratives** across sources.
 4. **Catalysts and risks** surfaced by the data.
 5. **Markdown table** at the end summarizing key sentiment signals, their direction, source, and supporting evidence.
