@@ -91,8 +91,8 @@ function safeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "").slice(0, 80) || "report";
 }
 
-function downloadTextFile(filename: string, content: string) {
-  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+function downloadTextFile(filename: string, content: string, mimeType = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
@@ -650,8 +650,8 @@ function HomeView() {
   const expandedReport = showcaseReports.find((record) => record.id === expandedReportId);
   const exportShowcaseReport = (record: ShowcaseReportRecord) => {
     const label = record.display_name || record.symbol;
-    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.md`;
-    downloadTextFile(name, buildTradingAgentsMarkdown(record.report, record.display_name));
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.html`;
+    downloadTextFile(name, buildTradingAgentsHtml(record.report, record.display_name), "text/html;charset=utf-8");
   };
 
   return (
@@ -1076,8 +1076,8 @@ function AssetReportPage({
 
   const exportReport = () => {
     if (!report) return;
-    const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.md`;
-    downloadTextFile(name, buildTradingAgentsMarkdown(report));
+    const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.html`;
+    downloadTextFile(name, buildTradingAgentsHtml(report), "text/html;charset=utf-8");
   };
 
   const stopReport = async () => {
@@ -1354,8 +1354,8 @@ function AShareView({
 
   const exportReport = () => {
     if (!report || !detail) return;
-    const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.md`;
-    downloadTextFile(name, buildTradingAgentsMarkdown(report, detail.stock.name));
+    const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.html`;
+    downloadTextFile(name, buildTradingAgentsHtml(report, detail.stock.name), "text/html;charset=utf-8");
   };
 
   const stopTradingAgents = async () => {
@@ -1670,8 +1670,8 @@ function ReportHistory({
 
   const exportRecord = (record: ReportRecord) => {
     const label = record.display_name || record.symbol;
-    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.md`;
-    downloadTextFile(name, buildTradingAgentsMarkdown(record.report, record.display_name));
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.html`;
+    downloadTextFile(name, buildTradingAgentsHtml(record.report, record.display_name), "text/html;charset=utf-8");
   };
 
   const stopJob = async (job: ReportJob) => {
@@ -1983,22 +1983,397 @@ function agentSectionTitle(key: string) {
   return map[key] || key;
 }
 
-function buildTradingAgentsMarkdown(report: TradingAgentsReport, stockName?: string) {
+function escapeHtml(value: string) {
+  const entities: Record<string, string> = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  };
+  return value.replace(/[&<>"']/g, (char) => entities[char]);
+}
+
+function safeHtmlId(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]+/g, "-") || "section";
+}
+
+function renderInlineMarkdownHtml(text: string) {
+  return text.split(/(\*\*[^*]+?\*\*|`[^`]+?`)/g).map((part) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return `<strong>${escapeHtml(part.slice(2, -2))}</strong>`;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return `<code>${escapeHtml(part.slice(1, -1))}</code>`;
+    }
+    return escapeHtml(part);
+  }).join("");
+}
+
+function markdownToHtml(content: string) {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: string[] = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trimEnd();
+    const trimmed = line.trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith("```")) {
+      const codeLines: string[] = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push(`<pre><code>${escapeHtml(codeLines.join("\n"))}</code></pre>`);
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1].length <= 2 ? 3 : 4;
+      blocks.push(`<h${level}>${renderInlineMarkdownHtml(heading[2])}</h${level}>`);
+      index += 1;
+      continue;
+    }
+
+    if (isMarkdownTableRow(line) && index + 1 < lines.length && isMarkdownTableSeparator(lines[index + 1])) {
+      const tableLines = [line];
+      index += 2;
+      while (index < lines.length && isMarkdownTableRow(lines[index])) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      const rows = tableLines.map(splitMarkdownCells);
+      const [headers, ...bodyRows] = rows;
+      blocks.push(`
+        <div class="table-wrap">
+          <table>
+            <thead><tr>${headers.map((cell) => `<th>${renderInlineMarkdownHtml(cell)}</th>`).join("")}</tr></thead>
+            <tbody>
+              ${bodyRows.map((row) => `<tr>${headers.map((_, cellIndex) => `<td>${renderInlineMarkdownHtml(row[cellIndex] || "")}</td>`).join("")}</tr>`).join("")}
+            </tbody>
+          </table>
+        </div>
+      `);
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(`<ul>${items.map((item) => `<li>${renderInlineMarkdownHtml(item)}</li>`).join("")}</ul>`);
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items: string[] = [];
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      blocks.push(`<ol>${items.map((item) => `<li>${renderInlineMarkdownHtml(item)}</li>`).join("")}</ol>`);
+      continue;
+    }
+
+    if (trimmed.startsWith(">")) {
+      const quoteLines: string[] = [];
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
+        index += 1;
+      }
+      blocks.push(`<blockquote>${renderInlineMarkdownHtml(quoteLines.join(" "))}</blockquote>`);
+      continue;
+    }
+
+    const paragraphLines = [trimmed];
+    index += 1;
+    while (index < lines.length) {
+      const next = lines[index].trim();
+      if (!next || isMarkdownBlockStart(next) || next.startsWith(">")) break;
+      paragraphLines.push(next);
+      index += 1;
+    }
+    blocks.push(`<p>${renderInlineMarkdownHtml(paragraphLines.join(" "))}</p>`);
+  }
+
+  return blocks.join("\n");
+}
+
+function buildTradingAgentsHtml(report: TradingAgentsReport, stockName?: string) {
   const title = `${stockName ? `${stockName} ` : ""}${report.code} TradingAgents 中文交易报告`;
-  const lines = [
-    `# ${title}`,
-    "",
-    `- 代码：${report.code}`,
-    `- 行情符号：${report.symbol}`,
-    `- 分析日期：${report.trade_date}`,
-    ""
-  ];
+  const sectionEntries = Object.entries(report.sections).filter(([, value]) => Boolean(value?.trim()));
+  const generatedAt = new Date().toLocaleString("zh-CN", { hour12: false });
+  const navItemsHtml = sectionEntries.map(([key], index) => {
+    const label = agentSectionTitle(key);
+    return `<a href="#${safeHtmlId(key)}"><span>${String(index + 1).padStart(2, "0")}</span>${escapeHtml(label)}</a>`;
+  }).join("");
+  const sectionHtml = sectionEntries.map(([key, value], index) => `
+    <article id="${safeHtmlId(key)}" class="section">
+      <div class="section-title">
+        <span>${String(index + 1).padStart(2, "0")}</span>
+        <h2>${escapeHtml(agentSectionTitle(key))}</h2>
+      </div>
+      <div class="markdown">${markdownToHtml(String(value).trim())}</div>
+    </article>
+  `).join("");
 
-  Object.entries(report.sections).forEach(([key, value]) => {
-    if (!value) return;
-    lines.push(`## ${agentSectionTitle(key)}`, "", String(value).trim(), "");
-  });
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(title)}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #10202d;
+      --muted: #5f6f7b;
+      --line: #d9e3e7;
+      --panel: #ffffff;
+      --page: #f4f7f8;
+      --accent: #12a88a;
+      --accent-soft: #e7f7f3;
+      --amber: #fff7df;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      line-height: 1.78;
+    }
+    .shell {
+      width: min(1080px, calc(100% - 40px));
+      margin: 32px auto;
+    }
+    .hero {
+      overflow: hidden;
+      border: 1px solid #0f2632;
+      border-radius: 8px;
+      background: #0d141b;
+      color: #f8fbfc;
+    }
+    .hero-inner {
+      display: grid;
+      gap: 28px;
+      padding: 34px;
+    }
+    .eyebrow {
+      margin-bottom: 10px;
+      color: #8ee4d1;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.16;
+      letter-spacing: 0;
+    }
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 20px;
+      color: #c9d5da;
+      font-size: 13px;
+    }
+    .meta span {
+      border: 1px solid rgba(255,255,255,.12);
+      border-radius: 6px;
+      background: rgba(255,255,255,.05);
+      padding: 5px 10px;
+    }
+    .toc {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+      gap: 10px;
+      margin: 18px 0;
+    }
+    .toc a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      padding: 11px 12px;
+      color: var(--ink);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 650;
+    }
+    .toc span, .section-title span {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+      width: 30px;
+      height: 30px;
+      border: 1px solid rgba(18,168,138,.32);
+      border-radius: 6px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .section, .risk {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 26px;
+      margin-top: 16px;
+      box-shadow: 0 10px 24px rgba(16,32,45,.05);
+    }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 14px;
+      margin-bottom: 18px;
+    }
+    .section-title h2 {
+      margin: 0;
+      font-size: 22px;
+      line-height: 1.35;
+      letter-spacing: 0;
+    }
+    .markdown h3 {
+      border-left: 3px solid var(--accent);
+      padding-left: 12px;
+      margin: 24px 0 12px;
+      font-size: 17px;
+      line-height: 1.45;
+    }
+    .markdown h4 {
+      margin: 20px 0 10px;
+      font-size: 15px;
+      color: #263947;
+    }
+    .markdown p {
+      margin: 10px 0;
+      color: #354957;
+      font-size: 15px;
+    }
+    .markdown ul, .markdown ol {
+      margin: 10px 0;
+      padding-left: 24px;
+      color: #354957;
+      font-size: 15px;
+    }
+    .markdown li { margin: 4px 0; }
+    strong { color: var(--ink); font-weight: 760; }
+    code {
+      border-radius: 4px;
+      background: #eef3f5;
+      padding: 2px 5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: .92em;
+    }
+    pre {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #0d141b;
+      color: #e9f2f4;
+      padding: 14px;
+    }
+    blockquote {
+      margin: 14px 0;
+      border-left: 3px solid var(--accent);
+      background: #f6faf9;
+      padding: 10px 14px;
+      color: #415562;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      margin: 14px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 640px;
+      font-size: 14px;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f0f6f6;
+      color: #223644;
+      font-weight: 760;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .risk {
+      border-color: #f0d58a;
+      background: var(--amber);
+      color: #76550b;
+      font-size: 14px;
+    }
+    .risk strong { display: block; margin-bottom: 6px; color: #5f4308; }
+    @media print {
+      body { background: #fff; }
+      .shell { width: 100%; margin: 0; }
+      .hero, .section, .risk { box-shadow: none; break-inside: avoid; }
+      .toc { display: none; }
+      a { color: inherit; }
+    }
+    @media (max-width: 640px) {
+      .shell { width: min(100% - 24px, 1080px); margin: 18px auto; }
+      .hero-inner, .section, .risk { padding: 20px; }
+      h1 { font-size: 28px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <div class="hero-inner">
+        <div>
+          <div class="eyebrow">TradingAgents Research</div>
+          <h1>${escapeHtml(title)}</h1>
+          <div class="meta">
+            <span>代码 ${escapeHtml(report.code)}</span>
+            <span>行情符号 ${escapeHtml(report.symbol)}</span>
+            <span>分析日期 ${escapeHtml(report.trade_date)}</span>
+            <span>${sectionEntries.length} 个分段</span>
+            <span>导出时间 ${escapeHtml(generatedAt)}</span>
+          </div>
+        </div>
+      </div>
+    </header>
 
-  lines.push("## 风险提示", "", report.risk_notice);
-  return `${lines.join("\n")}\n`;
+    <nav class="toc">${navItemsHtml}</nav>
+
+    ${sectionHtml}
+
+    <section class="risk">
+      <strong>风险提示</strong>
+      ${escapeHtml(report.risk_notice)}
+    </section>
+  </main>
+</body>
+</html>
+`;
 }
