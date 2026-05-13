@@ -20,9 +20,9 @@ import {
   UserPlus
 } from "lucide-react";
 import { api, getAuthToken, setAuthToken } from "./api";
-import type { AuthSession, ReportJob, ReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
+import type { AdminUser, AuthSession, ReportJob, ReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
 
-type View = "home" | "a-share" | "us" | "crypto";
+type View = "home" | "a-share" | "us" | "crypto" | "admin";
 
 const navItems: Array<{ id: View; label: string; icon: typeof Home }> = [
   { id: "home", label: "首页", icon: Home },
@@ -97,6 +97,10 @@ function formatElapsed(seconds: number) {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return minutes ? `${minutes}分${rest.toString().padStart(2, "0")}秒` : `${rest}秒`;
+}
+
+function accountLevelLabel(level: AdminUser["account_level"]) {
+  return level === "vip" ? "VIP用户" : "普通用户";
 }
 
 function getTradingAgentProgress(elapsedSeconds: number) {
@@ -499,6 +503,12 @@ export default function App() {
     setView("home");
   };
 
+  useEffect(() => {
+    if (view === "admin" && !session?.user.is_super_admin) {
+      setView("home");
+    }
+  }, [view, session?.user.is_super_admin]);
+
   if (!authReady) return <AuthLoading />;
   if (!session) return <AuthShell onAuthenticated={handleAuthenticated} />;
 
@@ -528,9 +538,24 @@ export default function App() {
                 </button>
               );
             })}
+            {session.user.is_super_admin && (
+              <button
+                onClick={() => setView("admin")}
+                className={`inline-flex items-center gap-2 rounded border px-3 py-2 text-sm ${
+                  view === "admin" ? "border-accent bg-teal-50 text-accent" : "border-line bg-white text-slate-700"
+                }`}
+                title="后台管理"
+              >
+                <ShieldCheck size={16} />
+                后台管理
+              </button>
+            )}
             <div className="flex items-center gap-2 rounded border border-line bg-slate-50 px-3 py-2 text-sm text-slate-700">
               <User size={16} />
               {session.user.display_name}
+              {session.user.is_super_admin && (
+                <span className="rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-xs text-emerald-700">超级管理员</span>
+              )}
             </div>
             <button
               onClick={logout}
@@ -578,6 +603,7 @@ export default function App() {
             examples={["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"]}
           />
         )}
+        {view === "admin" && session.user.is_super_admin && <AdminView />}
       </main>
 
       <footer className="fixed inset-x-0 bottom-0 border-t border-line bg-white px-4 py-3 text-center text-sm text-slate-700">
@@ -606,6 +632,146 @@ function HomeView() {
           ))}
         </div>
       </section>
+    </div>
+  );
+}
+
+function AdminView() {
+  const [users, setUsers] = useState<AdminUser[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [savingUserId, setSavingUserId] = useState<number | null>(null);
+  const [error, setError] = useState("");
+
+  const loadUsers = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setUsers(await api.adminUsers());
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
+
+  const updateLevel = async (user: AdminUser, level: AdminUser["account_level"]) => {
+    if (user.account_level === level || user.is_super_admin) return;
+    setSavingUserId(user.id);
+    setError("");
+    try {
+      const updated = await api.updateAdminUser(user.id, level);
+      setUsers((current) => current.map((item) => item.id === updated.id ? updated : item));
+    } catch (requestError) {
+      setError((requestError as Error).message);
+    } finally {
+      setSavingUserId(null);
+    }
+  };
+
+  return (
+    <div>
+      <section className="border-b border-line pb-5">
+        <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-xl font-semibold text-ink">后台用户管理</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              仅超级管理员可访问。当前支持普通用户和 VIP 用户两类，暂不区分业务权限。
+            </p>
+          </div>
+          <button
+            onClick={loadUsers}
+            disabled={loading}
+            className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50"
+          >
+            <RefreshCw size={16} className={loading ? "animate-spin" : ""} />
+            刷新用户
+          </button>
+        </div>
+        <div className="grid gap-3 md:grid-cols-3">
+          <div className="rounded border border-line bg-white p-4">
+            <div className="text-xs text-slate-500">用户总数</div>
+            <div className="mt-1 text-2xl font-semibold text-ink">{users.length}</div>
+          </div>
+          <div className="rounded border border-line bg-white p-4">
+            <div className="text-xs text-slate-500">VIP 用户</div>
+            <div className="mt-1 text-2xl font-semibold text-ink">{users.filter((user) => user.account_level === "vip").length}</div>
+          </div>
+          <div className="rounded border border-line bg-white p-4">
+            <div className="text-xs text-slate-500">运行中任务</div>
+            <div className="mt-1 text-2xl font-semibold text-ink">{users.reduce((sum, user) => sum + user.active_job_count, 0)}</div>
+          </div>
+        </div>
+      </section>
+
+      <Section title="用户列表">
+        <div className="rounded border border-line bg-white">
+          {error && (
+            <div className="m-4 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              {error}
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>用户</th>
+                  <th>等级</th>
+                  <th>报告数</th>
+                  <th>运行任务</th>
+                  <th>最近在线</th>
+                  <th>创建时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {users.map((user) => (
+                  <tr key={user.id} className={user.is_super_admin ? "bg-emerald-50/70" : "hover:bg-slate-50"}>
+                    <td>
+                      <div className="font-medium text-ink">{user.display_name}</div>
+                      <div className="mt-1 font-mono text-xs text-slate-500">{user.email}</div>
+                      {user.is_super_admin && (
+                        <span className="mt-2 inline-flex rounded border border-emerald-200 bg-white px-2 py-1 text-xs text-emerald-700">
+                          最高超级管理员
+                        </span>
+                      )}
+                    </td>
+                    <td>{accountLevelLabel(user.account_level)}</td>
+                    <td>{user.report_count}</td>
+                    <td>{user.active_job_count}</td>
+                    <td>{user.last_seen_at || "-"}</td>
+                    <td>{user.created_at || "-"}</td>
+                    <td>
+                      <select
+                        value={user.account_level}
+                        disabled={user.is_super_admin || savingUserId === user.id}
+                        onChange={(event) => updateLevel(user, event.target.value as AdminUser["account_level"])}
+                        className="rounded border border-line bg-white px-3 py-2 text-sm outline-none focus:border-accent disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-500"
+                      >
+                        <option value="regular">普通用户</option>
+                        <option value="vip">VIP用户</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+                {!loading && !users.length && (
+                  <tr>
+                    <td colSpan={7} className="text-center text-slate-500">暂无用户数据。</td>
+                  </tr>
+                )}
+                {loading && (
+                  <tr>
+                    <td colSpan={7} className="text-center text-slate-500">正在加载用户...</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </Section>
     </div>
   );
 }

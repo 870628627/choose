@@ -47,11 +47,26 @@ export type AuthUser = {
   id: number;
   email: string;
   display_name: string;
+  account_level: "regular" | "vip";
+  is_super_admin: boolean;
 };
 
 export type AuthSession = {
   token: string;
   user: AuthUser;
+};
+
+export type AdminUser = {
+  id: number;
+  email: string;
+  display_name: string;
+  account_level: "regular" | "vip";
+  is_super_admin: boolean;
+  created_at: string;
+  updated_at: string;
+  last_seen_at?: string;
+  report_count: number;
+  active_job_count: number;
 };
 
 export type ReportRecord = {

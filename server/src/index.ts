@@ -2,7 +2,7 @@ import "dotenv/config";
 import cors from "cors";
 import express from "express";
 import { z } from "zod";
-import { bearerToken, createSession, createUser, requireAuth, revokeSession, verifyUser } from "./auth.js";
+import { bearerToken, createSession, createUser, isSuperAdminEmail, requireAuth, requireSuperAdmin, revokeSession, verifyUser } from "./auth.js";
 import { addUserStock, db, getStockByCode, getUserStockByCode, listStocks, listUserStockCodes, removeUserStock } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
 import { cancelReportJobForUser, createReportJob, deleteReportJobForUser, getReportJobForUser, initializeReportJobQueue, listReportJobsForUser } from "./reportJobs.js";
@@ -43,6 +43,9 @@ const authSchema = z.object({
   password: z.string().min(8, "密码至少 8 位").max(128)
 });
 const loginSchema = authSchema;
+const adminUserUpdateSchema = z.object({
+  account_level: z.enum(["regular", "vip"])
+});
 
 function assetTypeForSymbol(symbol: string) {
   const normalized = symbol.trim().toUpperCase();
@@ -62,6 +65,24 @@ function reportRow(row: Record<string, unknown>) {
     trade_date: String(row.trade_date),
     created_at: String(row.created_at),
     report: { ...report, record_id: id }
+  };
+}
+
+function adminUserRow(row: Record<string, unknown>) {
+  const email = String(row.email || row.username || "").toLowerCase();
+  const isSuperAdmin = isSuperAdminEmail(email) || String(row.admin_role || "") === "super_admin";
+  const accountLevel = String(row.account_level || "") === "vip" || isSuperAdmin ? "vip" : "regular";
+  return {
+    id: Number(row.id),
+    email,
+    display_name: String(row.display_name || email.split("@")[0] || "Trader"),
+    account_level: accountLevel,
+    is_super_admin: isSuperAdmin,
+    created_at: String(row.created_at || ""),
+    updated_at: String(row.updated_at || ""),
+    last_seen_at: row.last_seen_at ? String(row.last_seen_at) : "",
+    report_count: Number(row.report_count || 0),
+    active_job_count: Number(row.active_job_count || 0)
   };
 }
 
@@ -221,6 +242,87 @@ app.post("/api/auth/logout", requireAuth, (req, res) => {
 
 app.get("/api/auth/me", requireAuth, (req, res) => {
   res.json({ user: (req as AuthenticatedRequest).user });
+});
+
+app.get("/api/admin/users", requireAuth, requireSuperAdmin, (_req, res) => {
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        u.id,
+        u.username,
+        u.email,
+        u.display_name,
+        u.account_level,
+        u.admin_role,
+        u.created_at,
+        u.updated_at,
+        (
+          SELECT max(last_seen_at)
+          FROM auth_sessions
+          WHERE user_id = u.id
+        ) AS last_seen_at,
+        (
+          SELECT count(*)
+          FROM trading_reports
+          WHERE user_id = u.id AND deleted_at IS NULL
+        ) AS report_count,
+        (
+          SELECT count(*)
+          FROM report_jobs
+          WHERE user_id = u.id AND status IN ('queued', 'running')
+        ) AS active_job_count
+      FROM users u
+      ORDER BY
+        CASE WHEN lower(coalesce(u.email, u.username)) = '870628627@qq.com' THEN 0 ELSE 1 END,
+        u.created_at DESC,
+        u.id DESC
+    `
+    )
+    .all() as Array<Record<string, unknown>>;
+  res.json(rows.map(adminUserRow));
+});
+
+app.patch("/api/admin/users/:id", requireAuth, requireSuperAdmin, (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "用户 ID 不正确" });
+      return;
+    }
+    const body = adminUserUpdateSchema.parse(req.body ?? {});
+    const current = db
+      .prepare("SELECT id, username, email, admin_role FROM users WHERE id = ?")
+      .get(id) as Record<string, unknown> | undefined;
+    if (!current) {
+      res.status(404).json({ error: "用户不存在" });
+      return;
+    }
+    const email = String(current.email || current.username || "").toLowerCase();
+    if (isSuperAdminEmail(email) || String(current.admin_role || "") === "super_admin") {
+      res.status(400).json({ error: "超级管理员账户等级已锁定" });
+      return;
+    }
+    db
+      .prepare("UPDATE users SET account_level = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
+      .run(body.account_level, id);
+    const row = db
+      .prepare(
+        `
+        SELECT
+          u.*,
+          (SELECT max(last_seen_at) FROM auth_sessions WHERE user_id = u.id) AS last_seen_at,
+          (SELECT count(*) FROM trading_reports WHERE user_id = u.id AND deleted_at IS NULL) AS report_count,
+          (SELECT count(*) FROM report_jobs WHERE user_id = u.id AND status IN ('queued', 'running')) AS active_job_count
+        FROM users u
+        WHERE u.id = ?
+      `
+      )
+      .get(id) as Record<string, unknown>;
+    res.json(adminUserRow(row));
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/reports", requireAuth, (req, res) => {

@@ -216,6 +216,17 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
   `);
 
   tryExec(db, "ALTER TABLE users ADD COLUMN email TEXT", "duplicate column");
+  tryExec(db, "ALTER TABLE users ADD COLUMN account_level TEXT NOT NULL DEFAULT 'regular'", "duplicate column");
+  tryExec(db, "ALTER TABLE users ADD COLUMN admin_role TEXT NOT NULL DEFAULT 'none'", "duplicate column");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)");
   db.exec("UPDATE users SET email = username WHERE email IS NULL AND username LIKE '%@%'");
+  db.exec("UPDATE users SET account_level = 'regular' WHERE account_level IS NULL OR account_level NOT IN ('regular', 'vip')");
+  db.exec("UPDATE users SET admin_role = 'none' WHERE admin_role IS NULL OR admin_role != 'super_admin'");
+  db.exec(`
+    UPDATE users
+    SET admin_role = 'super_admin',
+        account_level = 'vip',
+        updated_at = CURRENT_TIMESTAMP
+    WHERE lower(coalesce(email, username)) = '870628627@qq.com'
+  `);
 }

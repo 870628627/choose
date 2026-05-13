@@ -1,4 +1,4 @@
-import type { AuthSession, AuthUser, ReportJob, ReportRecord, StockDetail, StockListItem } from "./types";
+import type { AdminUser, AuthSession, AuthUser, ReportJob, ReportRecord, StockDetail, StockListItem } from "./types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 const tokenKey = "alphascope_token";
@@ -61,6 +61,13 @@ export const api = {
       body: JSON.stringify({})
     }),
   me: () => request<{ user: AuthUser }>("/api/auth/me"),
+  adminUsers: () => request<AdminUser[]>("/api/admin/users"),
+  updateAdminUser: (id: number, accountLevel: AdminUser["account_level"]) =>
+    request<AdminUser>(`/api/admin/users/${id}`, {
+      method: "PATCH",
+      headers: jsonHeaders,
+      body: JSON.stringify({ account_level: accountLevel })
+    }),
   reports: (assetType?: ReportRecord["asset_type"]) =>
     request<ReportRecord[]>(assetType ? `/api/reports?asset_type=${encodeURIComponent(assetType)}` : "/api/reports"),
   reportJobs: (assetType?: ReportRecord["asset_type"]) =>
