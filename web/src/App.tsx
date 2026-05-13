@@ -91,16 +91,94 @@ function safeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "").slice(0, 80) || "report";
 }
 
-function downloadTextFile(filename: string, content: string, mimeType = "text/plain;charset=utf-8") {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
+function waitForFrameLoad(frame: HTMLIFrameElement) {
+  return new Promise<void>((resolve) => {
+    frame.onload = () => resolve();
+  });
+}
+
+async function downloadTradingAgentsPdf(filename: string, report: TradingAgentsReport, stockName?: string) {
+  const [{ default: html2canvas }, { default: jsPDF }] = await Promise.all([
+    import("html2canvas"),
+    import("jspdf")
+  ]);
+  const frame = document.createElement("iframe");
+  frame.style.position = "fixed";
+  frame.style.left = "-10000px";
+  frame.style.top = "0";
+  frame.style.width = "1180px";
+  frame.style.height = "1200px";
+  frame.style.border = "0";
+  frame.style.opacity = "0";
+  frame.style.pointerEvents = "none";
+
+  const ready = waitForFrameLoad(frame);
+  frame.srcdoc = buildTradingAgentsHtml(report, stockName);
+  document.body.appendChild(frame);
+  await ready;
+
+  const frameDocument = frame.contentDocument;
+  if (!frameDocument) {
+    frame.remove();
+    throw new Error("无法创建 PDF 渲染页面");
+  }
+
+  try {
+    if (frameDocument.fonts?.ready) {
+      await frameDocument.fonts.ready;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 250));
+
+    const shell = frameDocument.querySelector(".shell") as HTMLElement | null;
+    const target = shell || frameDocument.body;
+    const height = Math.max(
+      target.scrollHeight,
+      frameDocument.documentElement.scrollHeight,
+      frameDocument.body.scrollHeight
+    );
+    frame.style.height = `${height + 80}px`;
+
+    const canvas = await html2canvas(target, {
+      backgroundColor: "#f4f7f8",
+      scale: Math.min(window.devicePixelRatio || 1, 1.5),
+      useCORS: true,
+      windowWidth: 1180,
+      windowHeight: height + 80
+    });
+
+    const pdf = new jsPDF("p", "mm", "a4");
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 8;
+    const imgWidth = pageWidth - margin * 2;
+    const imgHeight = (canvas.height * imgWidth) / canvas.width;
+    let position = margin;
+    let remainingHeight = imgHeight;
+    const image = canvas.toDataURL("image/jpeg", 0.92);
+
+    pdf.addImage(image, "JPEG", margin, position, imgWidth, imgHeight);
+    remainingHeight -= pageHeight - margin * 2;
+
+    while (remainingHeight > 0) {
+      position = remainingHeight - imgHeight + margin;
+      pdf.addPage();
+      pdf.addImage(image, "JPEG", margin, position, imgWidth, imgHeight);
+      remainingHeight -= pageHeight - margin * 2;
+    }
+
+    pdf.save(filename);
+  } finally {
+    frame.remove();
+  }
+}
+
+async function exportTradingAgentsPdf(filename: string, report: TradingAgentsReport, stockName?: string) {
+  try {
+    await downloadTradingAgentsPdf(filename, report, stockName);
+  } catch (error) {
+    console.error(error);
+    alert("PDF 生成失败，请稍后重试。");
+  }
 }
 
 function formatElapsed(seconds: number) {
@@ -650,8 +728,8 @@ function HomeView() {
   const expandedReport = showcaseReports.find((record) => record.id === expandedReportId);
   const exportShowcaseReport = (record: ShowcaseReportRecord) => {
     const label = record.display_name || record.symbol;
-    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.html`;
-    downloadTextFile(name, buildTradingAgentsHtml(record.report, record.display_name), "text/html;charset=utf-8");
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.pdf`;
+    void exportTradingAgentsPdf(name, record.report, record.display_name);
   };
 
   return (
@@ -1076,8 +1154,8 @@ function AssetReportPage({
 
   const exportReport = () => {
     if (!report) return;
-    const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.html`;
-    downloadTextFile(name, buildTradingAgentsHtml(report), "text/html;charset=utf-8");
+    const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.pdf`;
+    void exportTradingAgentsPdf(name, report);
   };
 
   const stopReport = async () => {
@@ -1354,8 +1432,8 @@ function AShareView({
 
   const exportReport = () => {
     if (!report || !detail) return;
-    const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.html`;
-    downloadTextFile(name, buildTradingAgentsHtml(report, detail.stock.name), "text/html;charset=utf-8");
+    const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.pdf`;
+    void exportTradingAgentsPdf(name, report, detail.stock.name);
   };
 
   const stopTradingAgents = async () => {
@@ -1670,8 +1748,8 @@ function ReportHistory({
 
   const exportRecord = (record: ReportRecord) => {
     const label = record.display_name || record.symbol;
-    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.html`;
-    downloadTextFile(name, buildTradingAgentsHtml(record.report, record.display_name), "text/html;charset=utf-8");
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.pdf`;
+    void exportTradingAgentsPdf(name, record.report, record.display_name);
   };
 
   const stopJob = async (job: ReportJob) => {
