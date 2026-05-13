@@ -10,7 +10,11 @@ back gracefully to free-text generation.
 
 from __future__ import annotations
 
-from tradingagents.agents.schemas import PortfolioDecision, render_pm_decision
+from tradingagents.agents.schemas import (
+    PortfolioDecision,
+    normalize_pm_decision_markdown,
+    render_pm_decision,
+)
 from tradingagents.agents.utils.agent_utils import (
     build_instrument_context,
     get_language_instruction,
@@ -52,6 +56,18 @@ def create_portfolio_manager(llm):
 - **Underweight**: Reduce exposure, take partial profits
 - **Sell**: Exit position or avoid entry
 
+**Mandatory Chinese Final Decision Format:**
+The saved final decision must be a Chinese markdown report with these exact sections:
+1. `# 最终交易决策`
+2. `## 一、交易指令总览` with a table containing 最终动作、系统评级、参考价格、目标价、止损/失效位、仓位建议、时间周期
+3. `## 二、执行摘要`
+4. `## 三、执行计划`
+5. `## 四、核心依据`
+6. `## 五、风险控制与失效条件`
+7. `## 六、后续观察信号`
+
+Use Chinese for all prose. Keep the rating value itself as one of Buy / Overweight / Hold / Underweight / Sell and add the Chinese meaning next to it.
+
 **Context:**
 - Research Manager's investment plan: **{research_plan}**
 - Trader's transaction proposal: **{trader_plan}**
@@ -70,6 +86,7 @@ Be decisive and ground every conclusion in specific evidence from the analysts.{
             render_pm_decision,
             "Portfolio Manager",
         )
+        final_trade_decision = normalize_pm_decision_markdown(final_trade_decision)
 
         new_risk_debate_state = {
             "judge_decision": final_trade_decision,

@@ -1,7 +1,7 @@
 """Extract the 5-tier portfolio rating from the Portfolio Manager's decision.
 
 The Portfolio Manager produces a typed ``PortfolioDecision`` via structured
-output and renders it to markdown that always carries a ``**Rating**: X``
+output and renders it to Chinese markdown that carries a ``系统评级：X``
 header (see :func:`tradingagents.agents.schemas.render_pm_decision`).  The
 deterministic heuristic in :mod:`tradingagents.agents.utils.rating` is more
 than sufficient to extract that rating; no extra LLM call is needed.

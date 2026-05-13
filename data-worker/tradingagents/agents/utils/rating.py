@@ -22,9 +22,34 @@ RATINGS_5_TIER: Tuple[str, ...] = (
 
 _RATING_SET = {r.lower() for r in RATINGS_5_TIER}
 
-# Matches "Rating: X" / "rating - X" / "Rating: **X**" — tolerates markdown
-# bold wrappers and either a colon or hyphen separator.
-_RATING_LABEL_RE = re.compile(r"rating.*?[:\-][\s*]*(\w+)", re.IGNORECASE)
+# Matches "Rating: X", "系统评级：X", or "最终评级：X" — tolerates
+# markdown bold wrappers, Chinese punctuation, and parenthetical Chinese labels.
+_RATING_LABEL_RE = re.compile(
+    r"(?:rating|系统评级|最终评级|评级)[^A-Za-z]*"
+    r"(buy|overweight|hold|underweight|sell)(?:\b|[^A-Za-z])",
+    re.IGNORECASE,
+)
+
+_CHINESE_LABEL_RE = re.compile(
+    r"(?:最终动作|最终建议|交易建议|我的决策|最终评级|系统评级|评级).*?"
+    r"(清仓|卖出|强烈买入|买入|增配|加仓|减仓|减配|低配|持有|观望)"
+)
+
+_CHINESE_RATING_HINTS = (
+    ("清仓", "Sell"),
+    ("卖出", "Sell"),
+    ("减仓", "Underweight"),
+    ("减配", "Underweight"),
+    ("低配", "Underweight"),
+    ("强烈买入", "Buy"),
+    ("买入", "Buy"),
+    ("不主动加仓", "Hold"),
+    ("持有观望", "Hold"),
+    ("持有", "Hold"),
+    ("观望", "Hold"),
+    ("加仓", "Overweight"),
+    ("增配", "Overweight"),
+)
 
 
 def parse_rating(text: str, default: str = "Hold") -> str:
@@ -38,13 +63,26 @@ def parse_rating(text: str, default: str = "Hold") -> str:
     """
     for line in text.splitlines():
         m = _RATING_LABEL_RE.search(line)
-        if m and m.group(1).lower() in _RATING_SET:
-            return m.group(1).capitalize()
+        if m:
+            value = m.group(1).lower()
+            if value in _RATING_SET:
+                return value.capitalize()
+
+        chinese = _CHINESE_LABEL_RE.search(line)
+        if chinese:
+            label = chinese.group(1)
+            for hint, rating in _CHINESE_RATING_HINTS:
+                if hint == label:
+                    return rating
 
     for line in text.splitlines():
         for word in line.lower().split():
-            clean = word.strip("*:.,")
+            clean = word.strip("*:.,:：;；()（）[]【】")
             if clean in _RATING_SET:
                 return clean.capitalize()
+
+    for hint, rating in _CHINESE_RATING_HINTS:
+        if hint in text:
+            return rating
 
     return default
