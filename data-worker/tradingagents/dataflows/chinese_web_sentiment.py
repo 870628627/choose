@@ -3,7 +3,9 @@
 This module intentionally sticks to publicly accessible pages and search
 snippets. It does not log in, bypass captcha, or scrape private feeds. The
 result is a prompt-ready block that gives the sentiment analyst Chinese retail
-discussion clues from sites such as Xueqiu, Futu, Tiger, and Eastmoney.
+discussion clues from higher-signal Chinese US-stock communities first, such
+as Futu and Longbridge, then broader sources such as Xueqiu, Tiger, and
+Eastmoney.
 """
 
 from __future__ import annotations
@@ -140,10 +142,12 @@ def _direct_candidates(ticker: str) -> list[PageCandidate]:
     symbol = ticker.strip().upper()
     lower = symbol.lower()
     return [
-        PageCandidate("雪球", f"https://ai.xueqiu.com/S/{symbol}"),
-        PageCandidate("雪球", f"https://xueqiu.com/S/{symbol}"),
-        PageCandidate("富途牛牛", f"https://www.futunn.com/stock/{symbol}-US"),
         PageCandidate("富途牛牛", f"https://www.futunn.com/hans/stock/{symbol}-US"),
+        PageCandidate("富途牛牛", f"https://www.futunn.com/stock/{symbol}-US"),
+        PageCandidate("长桥", f"https://longbridge.com/zh-CN/quote/{symbol}.US"),
+        PageCandidate("长桥", f"https://longbridge.cn/quote/{symbol}.US"),
+        PageCandidate("雪球", f"https://xueqiu.com/S/{symbol}"),
+        PageCandidate("雪球", f"https://ai.xueqiu.com/S/{symbol}"),
         PageCandidate("老虎社区", f"https://www.laohu8.com/s/{symbol}"),
         PageCandidate("老虎社区", f"https://www.laohu8.com/m/hq/s/{symbol}/"),
         PageCandidate("东方财富美股吧", f"https://mguba.eastmoney.com/mguba/list/us{lower}"),
@@ -152,7 +156,8 @@ def _direct_candidates(ticker: str) -> list[PageCandidate]:
 
 
 def _scan_direct_pages(ticker: str, terms: list[str]) -> list[str]:
-    blocks = []
+    fragment_blocks = []
+    reachable_blocks = []
     for candidate in _direct_candidates(ticker):
         html = _safe_fetch(candidate.url)
         title, text = _extract_page_text(html)
@@ -168,11 +173,14 @@ def _scan_direct_pages(ticker: str, terms: list[str]) -> list[str]:
             lines.extend(f"- {fragment}" for fragment in fragments)
         else:
             lines.append("<page reachable, but no useful discussion fragment was found>")
-        blocks.append("\n".join(lines))
-        if len(blocks) >= 3:
+        if fragments:
+            fragment_blocks.append("\n".join(lines))
+        else:
+            reachable_blocks.append("\n".join(lines))
+        if len(fragment_blocks) >= 4:
             break
         time.sleep(0.3)
-    return blocks
+    return (fragment_blocks + reachable_blocks)[:4]
 
 
 def _bing_search(query: str, timeout: float = 5.0) -> list[dict[str, str]]:
@@ -193,8 +201,10 @@ def _bing_search(query: str, timeout: float = 5.0) -> list[dict[str, str]]:
 def _scan_search_snippets(ticker: str, alias: str) -> list[str]:
     terms = " ".join(part for part in [ticker, alias, "美股 讨论 评论 情绪"] if part)
     queries = [
-        f"{terms} site:xueqiu.com",
         f"{terms} site:futunn.com",
+        f"{terms} site:longbridge.com",
+        f"{terms} site:longbridge.cn",
+        f"{terms} site:xueqiu.com",
         f"{terms} site:laohu8.com",
         f"{terms} site:mguba.eastmoney.com",
         f"{terms} site:guba.eastmoney.com",
@@ -239,12 +249,12 @@ def fetch_chinese_us_stock_discussion(ticker: str) -> str:
     if not direct_blocks and not search_blocks:
         return (
             f"<no Chinese public-web discussion snippets found for {symbol}; "
-            "searched Xueqiu, Futu, Tiger, Eastmoney and Bing snippets>"
+            "searched Futu, Longbridge, Xueqiu, Tiger, Eastmoney and Bing snippets>"
         )
 
     lines = [
         f"Chinese public-web discussion scan for {symbol}{f' / {alias}' if alias else ''}",
-        "Scope: public pages and search snippets only; no login-only comments, no captcha bypass.",
+        "Scope: public pages and search snippets only; no login-only comments, no captcha bypass. Futu and Longbridge are scanned first.",
     ]
     if direct_blocks:
         lines.append("\n## Public pages")

@@ -8,7 +8,7 @@
 
 - 前端：React + Vite + TypeScript + Tailwind CSS
 - 后端：Node.js + Express + SQLite
-- 数据采集：Python data-worker；A 股行情优先 BaoStock，失败后回退东方财富 / AKShare；美股情绪可优先接 Finnhub
+- 数据采集：Python data-worker；A 股行情优先 BaoStock，失败后回退东方财富 / AKShare；美股情绪优先 Finnhub，并补充富途 / 长桥中文公开讨论线索
 - LLM：网页端接入 TradingAgents 中文交易报告，支持 OpenAI / DeepSeek 等模型配置
 
 ## 目录
@@ -60,7 +60,7 @@ copy .env.example server\.env
 - `DATA_WORKER_PYTHON`：Python 命令，默认 `python`
 - `DATA_WORKER_PATH`：data-worker 脚本路径
 - `TUSHARE_TOKEN`：预留 Tushare token
-- `FINNHUB_API_KEY`：美股市场讨论 / 社交情绪优先数据源；未配置时自动降级到 StockTwits / Reddit / Yahoo Finance
+- `FINNHUB_API_KEY`：美股市场讨论 / 社交情绪优先数据源；中文公开讨论会优先扫描富途 / 长桥，再补充雪球 / 老虎 / 东方财富
 - `OPENAI_API_KEY`、`DEEPSEEK_API_KEY`：TradingAgents 模型密钥配置
 - `TRADINGAGENTS_LLM_PROVIDER`：默认 `deepseek`；如需 OpenAI 可改为 `openai`
 - `TRADINGAGENTS_MAX_CONCURRENT_JOBS`：TradingAgents 报告全站并发数，默认 `1`，小 ECS 建议保持 1

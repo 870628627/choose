@@ -155,8 +155,8 @@ Aggregated social sentiment signal. Prefer this section when it contains real ro
 {finnhub_block}
 <end_of_finnhub_social_sentiment>
 
-### Chinese public-web discussion — Xueqiu / Futu / Tiger / Eastmoney
-Public Chinese investor discussion clues from reachable pages and search snippets. Treat this as a qualitative supplement, not a complete comment feed.
+### Chinese public-web discussion — Futu / Longbridge / Xueqiu / Tiger / Eastmoney
+Public Chinese investor discussion clues from reachable pages and search snippets. Futu and Longbridge are prioritized as higher-signal US-stock communities. Treat this as a qualitative supplement, not a complete comment feed.
 
 <start_of_chinese_public_web_discussion>
 {chinese_web_block}
@@ -189,7 +189,7 @@ Community discussion. Engagement signal via upvote score and comment count. Subr
 
 2. **Read the StockTwits Bullish/Bearish ratio as a direct retail-sentiment supplement.** A 70/30 bullish/bearish split is moderately bullish; ≥90/10 may indicate over-extension and contrarian risk; 50/50 is uncertainty. Sample size matters — base rates on the actual message count, not percentages alone.
 
-3. **Use Chinese public-web discussion as a local-language retail lens.** It can surface Chinese investor narratives from Xueqiu/Futu/Tiger/Eastmoney, but it may be based on public snippets rather than full comment feeds. Mark confidence accordingly.
+3. **Use Chinese public-web discussion as a local-language retail lens.** It can surface Chinese investor narratives from Futu/Longbridge/Xueqiu/Tiger/Eastmoney, but it may be based on public snippets rather than full comment feeds. Mark confidence accordingly.
 
 4. **Look for cross-source divergences.** If news framing is bearish but Finnhub/StockTwits/Chinese discussion is overwhelmingly bullish, that mismatch is itself a signal — it can mean retail is leaning into a thesis the news flow hasn't caught up to (or vice versa, that retail is chasing while institutions are cautious).
 
