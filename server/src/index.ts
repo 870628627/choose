@@ -5,7 +5,7 @@ import { z } from "zod";
 import { bearerToken, createSession, createUser, requireAuth, revokeSession, verifyUser } from "./auth.js";
 import { addUserStock, db, getStockByCode, getUserStockByCode, listStocks, listUserStockCodes, removeUserStock } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
-import { cancelReportJobForUser, createReportJob, getReportJobForUser, initializeReportJobQueue, listReportJobsForUser } from "./reportJobs.js";
+import { cancelReportJobForUser, createReportJob, deleteReportJobForUser, getReportJobForUser, initializeReportJobQueue, listReportJobsForUser } from "./reportJobs.js";
 import { createResearchScore } from "./scoring.js";
 import type { AuthenticatedRequest } from "./auth.js";
 import type { TradingAgentsReport, WorkerStockBasic, WorkerStockPayload } from "./types.js";
@@ -288,6 +288,20 @@ app.post("/api/report-jobs/:id/cancel", requireAuth, (req, res) => {
     return;
   }
   res.json(job);
+});
+
+app.delete("/api/report-jobs/:id", requireAuth, (req, res, next) => {
+  try {
+    const user = (req as AuthenticatedRequest).user;
+    const result = deleteReportJobForUser(Number(req.params.id), user.id);
+    if (!result) {
+      res.status(404).json({ error: "Report job not found" });
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/stocks", requireAuth, (req, res) => {

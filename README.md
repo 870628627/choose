@@ -65,6 +65,8 @@ copy .env.example server\.env
 - `TRADINGAGENTS_LLM_PROVIDER`：默认 `deepseek`；如需 OpenAI 可改为 `openai`
 - `TRADINGAGENTS_MAX_CONCURRENT_JOBS`：TradingAgents 报告全站并发数，默认 `1`，小 ECS 建议保持 1
 - `TRADINGAGENTS_MAX_QUEUED_PER_USER`：单个用户最多排队 / 运行中的报告数，默认 `3`
+- `TRADINGAGENTS_A_SHARE_PRICE_SOURCES`：A 股行情源顺序，默认 `baostock,eastmoney,akshare`；若 A 股卡在第一个 Agent，可临时改成 `eastmoney,akshare` 判断是否为 BaoStock 阻塞
+- `TRADINGAGENTS_A_SHARE_SOURCE_TIMEOUT`：单个 A 股行情源最长等待秒数，默认 `20`，超时后切到下一个源
 - `TRADINGAGENTS_ENABLE_LEGACY_US_SOCIAL`：是否启用 StockTwits / Reddit 公共抓取，默认 `0`
 - `TRADINGAGENTS_ENABLE_SENTIMENT_YFINANCE_NEWS`：是否在情绪分析阶段额外预取 Yahoo Finance 新闻，默认 `0`
 

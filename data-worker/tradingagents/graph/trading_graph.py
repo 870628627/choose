@@ -423,7 +423,7 @@ class TradingAgentsGraph:
             args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
 
         if on_update:
-            on_update("stage", {"title": "启动 TradingAgents", "percent": 5})
+            on_update("stage", {"title": "Market Analyst 正在读取行情和技术指标", "percent": 5})
 
         section_progress = {
             "market_report": 18,

@@ -72,6 +72,10 @@ export const api = {
       headers: jsonHeaders,
       body: JSON.stringify({})
     }),
+  deleteReportJob: (id: number) =>
+    request<{ ok: true }>(`/api/report-jobs/${id}`, {
+      method: "DELETE"
+    }),
   deleteReport: (id: number) =>
     request<{ ok: true }>(`/api/reports/${id}`, {
       method: "DELETE"

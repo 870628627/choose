@@ -1,6 +1,9 @@
 from contextlib import redirect_stdout
 from datetime import datetime
 from io import StringIO
+import multiprocessing as mp
+import os
+import queue as queue_module
 from typing import Optional
 
 import pandas as pd
@@ -52,6 +55,78 @@ def _normalize_ohlcv(data: pd.DataFrame) -> pd.DataFrame:
         data[column] = pd.to_numeric(data[column], errors="coerce")
     data = data.dropna(subset=["Date", "Close"]).sort_values("Date")
     return data[["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]].reset_index(drop=True)
+
+
+def _configured_sources() -> list[str]:
+    raw = os.getenv("TRADINGAGENTS_A_SHARE_PRICE_SOURCES", "baostock,eastmoney,akshare")
+    aliases = {
+        "bao": "baostock",
+        "baostock": "baostock",
+        "eastmoney": "eastmoney",
+        "em": "eastmoney",
+        "ak": "akshare",
+        "akshare": "akshare",
+    }
+    sources = []
+    for item in raw.split(","):
+        source = aliases.get(item.strip().lower())
+        if source and source not in sources:
+            sources.append(source)
+    return sources or ["baostock", "eastmoney", "akshare"]
+
+
+def _source_timeout_seconds() -> float:
+    try:
+        return max(0.0, float(os.getenv("TRADINGAGENTS_A_SHARE_SOURCE_TIMEOUT", "20")))
+    except ValueError:
+        return 20.0
+
+
+def _source_worker(source: str, symbol: str, start_date: str, end_date: str, queue):
+    try:
+        data = _load_source_direct(source, symbol, start_date, end_date)
+        queue.put(("ok", data))
+    except Exception as error:
+        queue.put(("error", repr(error)))
+
+
+def _load_source_direct(source: str, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    loaders = {
+        "baostock": get_baostock_ohlcv,
+        "eastmoney": get_eastmoney_ohlcv,
+        "akshare": get_akshare_native_ohlcv,
+    }
+    return loaders[source](symbol, start_date, end_date)
+
+
+def _load_source_with_timeout(source: str, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    timeout = _source_timeout_seconds()
+    if timeout <= 0:
+        return _load_source_direct(source, symbol, start_date, end_date)
+
+    try:
+        context = mp.get_context("fork")
+    except ValueError:
+        # Windows local development has no fork; keep direct calls there.
+        return _load_source_direct(source, symbol, start_date, end_date)
+
+    queue = context.Queue(maxsize=1)
+    process = context.Process(target=_source_worker, args=(source, symbol, start_date, end_date, queue))
+    process.start()
+    try:
+        status, payload = queue.get(timeout=timeout)
+    except queue_module.Empty:
+        process.terminate()
+        process.join(2)
+        raise TimeoutError(f"{source} A-share loader timed out after {timeout:.0f}s")
+    finally:
+        process.join(2)
+        if process.is_alive():
+            process.terminate()
+            process.join(2)
+    if status == "ok":
+        return payload
+    raise RuntimeError(str(payload))
 
 
 def get_baostock_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
@@ -143,18 +218,10 @@ def get_eastmoney_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataF
     return _normalize_ohlcv(data)
 
 
-def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+def get_akshare_native_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     code = a_share_code(symbol)
     if not code:
         raise ValueError(f"{symbol} is not an A-share symbol")
-
-    for loader in (get_baostock_ohlcv, get_eastmoney_ohlcv):
-        try:
-            data = loader(symbol, start_date, end_date)
-            if not data.empty:
-                return data
-        except Exception:
-            pass
 
     try:
         import akshare as ak  # type: ignore
@@ -193,6 +260,21 @@ def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFra
     return _normalize_ohlcv(data)
 
 
+def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+
+    for source in _configured_sources():
+        try:
+            data = _load_source_with_timeout(source, symbol, start_date, end_date)
+            if not data.empty:
+                return data
+        except Exception:
+            pass
+    return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+
+
 def format_akshare_stock_data(symbol: str, start_date: str, end_date: str) -> str:
     data = get_akshare_ohlcv(symbol, start_date, end_date)
     if data.empty:
@@ -205,7 +287,7 @@ def format_akshare_stock_data(symbol: str, start_date: str, end_date: str) -> st
     output = output.set_index("Date")
 
     header = f"# A-share stock data for {symbol.upper()} from {start_date} to {end_date}\n"
-    header += f"# Source priority: BaoStock daily k-line, then Eastmoney, then AKShare\n"
+    header += f"# Source priority: {', '.join(_configured_sources())}\n"
     header += f"# Total records: {len(output)}\n"
     header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
 

@@ -203,6 +203,18 @@ export function cancelReportJobForUser(jobId: number, userId: number) {
   return buildJobSnapshot(row);
 }
 
+export function deleteReportJobForUser(jobId: number, userId: number) {
+  const row = db.prepare("SELECT * FROM report_jobs WHERE id = ? AND user_id = ?").get(jobId, userId) as ReportJobRow | undefined;
+  if (!row) return null;
+  if (!["failed", "cancelled"].includes(row.status)) {
+    const error = new Error("只能删除失败或已停止的报告任务。");
+    (error as Error & { statusCode?: number }).statusCode = 409;
+    throw error;
+  }
+  db.prepare("DELETE FROM report_jobs WHERE id = ? AND user_id = ?").run(jobId, userId);
+  return { ok: true };
+}
+
 export function createReportJob(input: {
   userId: number;
   assetType: "a-share" | "us" | "crypto";

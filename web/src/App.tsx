@@ -1094,6 +1094,13 @@ function ReportHistory({
     setJobs((current) => current.map((item) => item.id === nextJob.id ? nextJob : item));
   };
 
+  const deleteJob = async (job: ReportJob) => {
+    const confirmed = window.confirm(`确定删除 ${job.symbol} 的${job.status === "cancelled" ? "已停止" : "失败"}任务吗？已保存的分段也会删除。`);
+    if (!confirmed) return;
+    await api.deleteReportJob(job.id);
+    setJobs((current) => current.filter((item) => item.id !== job.id));
+  };
+
   return (
     <Section title={`我的${assetTypeLabels[assetType]}报告记录`}>
       <div className="rounded border border-line bg-white">
@@ -1144,6 +1151,15 @@ function ReportHistory({
                   >
                     <Square size={13} />
                     停止
+                  </button>
+                )}
+                {(job.status === "failed" || job.status === "cancelled") && (
+                  <button
+                    onClick={() => deleteJob(job)}
+                    className="inline-flex items-center gap-1 rounded border border-line bg-white px-2 py-1 text-xs text-slate-700 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
+                  >
+                    <Trash2 size={13} />
+                    删除
                   </button>
                 )}
                 <span className={`rounded border px-2 py-1 text-xs ${
