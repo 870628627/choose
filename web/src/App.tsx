@@ -19,7 +19,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { api, getAuthToken, setAuthToken } from "./api";
-import type { AuthSession, ReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
+import type { AuthSession, ReportJob, ReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
 
 type View = "home" | "a-share" | "us" | "crypto";
 
@@ -55,6 +55,18 @@ const tradingAgentProgressSteps = [
   { title: "交易员方案", detail: "Trader Agent 生成交易动作、仓位思路和执行方案。", seconds: 35 },
   { title: "风险团队复核", detail: "激进、中性、保守风险角色复核交易方案。", seconds: 55 },
   { title: "最终决策", detail: "Portfolio Manager 汇总最终交易决策和中文报告。", seconds: 25 }
+];
+
+const progressStepSectionKeys = [
+  "",
+  "market_report",
+  "sentiment_report",
+  "news_report",
+  "fundamentals_report",
+  "investment_debate",
+  "trader_plan",
+  "risk_debate",
+  "final_trade_decision"
 ];
 
 function formatNumber(value: unknown, digits = 2) {
@@ -466,6 +478,7 @@ function AssetReportPage({
 }) {
   const [symbol, setSymbol] = useState("");
   const [report, setReport] = useState<TradingAgentsReport | null>(null);
+  const [job, setJob] = useState<ReportJob | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -479,6 +492,37 @@ function AssetReportPage({
     return () => window.clearInterval(timer);
   }, [loading]);
 
+  useEffect(() => {
+    if (!loading || !job) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const nextJob = await api.reportJob(job.id);
+        if (cancelled) return;
+        setJob(nextJob);
+        if (nextJob.status === "completed") {
+          setReport(nextJob.report_record?.report || null);
+          setHistoryVersion((current) => current + 1);
+          setLoading(false);
+        } else if (nextJob.status === "failed") {
+          setError(nextJob.error || "报告生成失败");
+          setLoading(false);
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          setError((requestError as Error).message);
+          setLoading(false);
+        }
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [loading, job?.id]);
+
   const runReport = async (nextSymbol = symbol) => {
     const normalized = nextSymbol.trim().toUpperCase();
     if (!normalized) return;
@@ -486,14 +530,13 @@ function AssetReportPage({
     setLoading(true);
     setError("");
     setReport(null);
+    setJob(null);
     setElapsedSeconds(0);
     try {
-      const nextReport = await api.tradingAgentsSymbolReport(normalized);
-      setReport(nextReport);
-      setHistoryVersion((current) => current + 1);
+      const nextJob = await api.tradingAgentsSymbolReport(normalized);
+      setJob(nextJob);
     } catch (requestError) {
       setError((requestError as Error).message);
-    } finally {
       setLoading(false);
     }
   };
@@ -551,7 +594,7 @@ function AssetReportPage({
           {!report && !loading && !error && (
             <p className="text-sm leading-6 text-slate-600">输入符号后即可生成 TradingAgents 中文报告。</p>
           )}
-          {loading && <TradingAgentsProgress elapsedSeconds={elapsedSeconds} />}
+          {loading && <TradingAgentsProgress elapsedSeconds={elapsedSeconds} job={job} />}
           {error && (
             <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
               {error}
@@ -581,6 +624,7 @@ function AShareView({
   const [busy, setBusy] = useState(false);
   const [detail, setDetail] = useState<StockDetail | null>(null);
   const [report, setReport] = useState<TradingAgentsReport | null>(null);
+  const [reportJob, setReportJob] = useState<ReportJob | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
   const [reportError, setReportError] = useState("");
   const [reportElapsedSeconds, setReportElapsedSeconds] = useState(0);
@@ -596,6 +640,7 @@ function AShareView({
 
   useEffect(() => {
     setReport(null);
+    setReportJob(null);
     setReportError("");
     setReportElapsedSeconds(0);
     loadDetail().catch(() => setDetail(null));
@@ -608,6 +653,37 @@ function AShareView({
     }, 1000);
     return () => window.clearInterval(timer);
   }, [reportLoading]);
+
+  useEffect(() => {
+    if (!reportLoading || !reportJob) return;
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const nextJob = await api.reportJob(reportJob.id);
+        if (cancelled) return;
+        setReportJob(nextJob);
+        if (nextJob.status === "completed") {
+          setReport(nextJob.report_record?.report || null);
+          setHistoryVersion((current) => current + 1);
+          setReportLoading(false);
+        } else if (nextJob.status === "failed") {
+          setReportError(nextJob.error || "报告生成失败");
+          setReportLoading(false);
+        }
+      } catch (requestError) {
+        if (!cancelled) {
+          setReportError((requestError as Error).message);
+          setReportLoading(false);
+        }
+      }
+    };
+    poll();
+    const timer = window.setInterval(poll, 2000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [reportLoading, reportJob?.id]);
 
   const addStock = async () => {
     if (!/^\d{6}$/.test(code)) return;
@@ -663,14 +739,14 @@ function AShareView({
     if (!selectedCode) return;
     setReportLoading(true);
     setReportError("");
+    setReport(null);
+    setReportJob(null);
     setReportElapsedSeconds(0);
     try {
-      const nextReport = await api.tradingAgentsReport(selectedCode);
-      setReport(nextReport);
-      setHistoryVersion((current) => current + 1);
+      const nextJob = await api.tradingAgentsReport(selectedCode);
+      setReportJob(nextJob);
     } catch (requestError) {
       setReportError((requestError as Error).message);
-    } finally {
       setReportLoading(false);
     }
   };
@@ -844,7 +920,7 @@ function AShareView({
               {!report && !reportLoading && !reportError && (
                 <p className="text-sm leading-6 text-slate-600">点击上方按钮后生成 A 股中文交易研究报告。</p>
               )}
-              {reportLoading && <TradingAgentsProgress elapsedSeconds={reportElapsedSeconds} />}
+              {reportLoading && <TradingAgentsProgress elapsedSeconds={reportElapsedSeconds} job={reportJob} />}
               {reportError && (
                 <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
                   {reportError}
@@ -901,6 +977,7 @@ function ReportHistory({
   refreshKey: number;
 }) {
   const [records, setRecords] = useState<ReportRecord[]>([]);
+  const [jobs, setJobs] = useState<ReportJob[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -909,8 +986,12 @@ function ReportHistory({
     setLoading(true);
     setError("");
     try {
-      const nextRecords = await api.reports(assetType);
+      const [nextRecords, nextJobs] = await Promise.all([
+        api.reports(assetType),
+        api.reportJobs(assetType)
+      ]);
       setRecords(nextRecords);
+      setJobs(nextJobs.filter((job) => job.status !== "completed"));
       if (expandedId && !nextRecords.some((record) => record.id === expandedId)) {
         setExpandedId(null);
       }
@@ -924,6 +1005,14 @@ function ReportHistory({
   useEffect(() => {
     loadRecords();
   }, [assetType, refreshKey]);
+
+  useEffect(() => {
+    if (!jobs.some((job) => job.status === "queued" || job.status === "running")) return;
+    const timer = window.setInterval(() => {
+      loadRecords();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [assetType, jobs]);
 
   const deleteRecord = async (record: ReportRecord) => {
     const confirmed = window.confirm(`确定删除 ${record.symbol} ${record.trade_date} 的报告记录吗？`);
@@ -961,9 +1050,51 @@ function ReportHistory({
             {error}
           </div>
         )}
-        {!loading && !records.length && !error && (
+        {!loading && !records.length && !jobs.length && !error && (
           <div className="px-4 py-8 text-center text-sm text-slate-500">这个账户还没有生成过{assetTypeLabels[assetType]}报告。</div>
         )}
+        {jobs.map((job) => (
+          <article key={job.id} className="border-b border-line bg-slate-50 px-4 py-4">
+            <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <div className="font-medium text-ink">
+                  {job.display_name ? `${job.display_name} ` : ""}{job.symbol} · 任务 #{job.id}
+                </div>
+                <div className="mt-1 text-sm text-slate-500">
+                  {job.status === "queued" ? `排队中，第 ${job.queue_position || 1} 位` : job.status === "running" ? job.current_stage : "生成失败"}
+                </div>
+              </div>
+              <span className={`rounded border px-2 py-1 text-xs ${
+                job.status === "failed"
+                  ? "border-red-200 bg-red-50 text-red-700"
+                  : job.status === "queued"
+                    ? "border-amber-200 bg-amber-50 text-amber-800"
+                    : "border-emerald-200 bg-emerald-50 text-emerald-700"
+              }`}>
+                {job.status === "failed" ? "失败" : job.status === "queued" ? "排队中" : "生成中"}
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded bg-white">
+              <div className="h-full rounded bg-accent" style={{ width: `${Math.max(3, Math.min(100, job.progress_percent))}%` }} />
+            </div>
+            {job.error && <p className="mt-2 text-sm leading-6 text-red-700">{job.error}</p>}
+            {job.sections.some((section) => section.content?.trim()) && (
+              <details className="mt-3 rounded border border-line bg-white p-3">
+                <summary className="cursor-pointer text-sm font-medium text-ink">
+                  查看已保存分段：{job.sections.filter((section) => section.content?.trim()).map((section) => section.title).join("、")}
+                </summary>
+                <div className="mt-3 space-y-3">
+                  {job.sections.filter((section) => section.content?.trim()).map((section) => (
+                    <article key={section.section_key}>
+                      <h3 className="mb-1 text-sm font-semibold text-ink">{section.title}</h3>
+                      <p className="max-h-56 overflow-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{section.content}</p>
+                    </article>
+                  ))}
+                </div>
+              </details>
+            )}
+          </article>
+        ))}
         {records.map((record) => {
           const expanded = expandedId === record.id;
           return (
@@ -1059,30 +1190,44 @@ function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsRe
   );
 }
 
-function TradingAgentsProgress({ elapsedSeconds }: { elapsedSeconds: number }) {
+function TradingAgentsProgress({ elapsedSeconds, job }: { elapsedSeconds: number; job?: ReportJob | null }) {
   const progress = getTradingAgentProgress(elapsedSeconds);
+  const percent = job ? Math.max(3, Math.min(100, job.progress_percent)) : progress.percent;
+  const currentStage = job?.current_stage || progress.step.title;
+  const sectionMap = new Map((job?.sections || []).map((section) => [section.section_key, section]));
+  const completedSections = (job?.sections || []).filter((section) => section.content?.trim());
 
   return (
     <div className="space-y-4">
       <div>
         <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-sm font-semibold text-ink">当前阶段：{progress.step.title}</div>
-            <p className="text-sm leading-6 text-slate-600">{progress.step.detail}</p>
+            <div className="text-sm font-semibold text-ink">当前阶段：{currentStage}</div>
+            <p className="text-sm leading-6 text-slate-600">
+              {job?.status === "queued"
+                ? `任务已进入队列，当前排第 ${job.queue_position || 1} 位。`
+                : progress.step.detail}
+            </p>
           </div>
           <div className="text-sm text-slate-500">已用时 {formatElapsed(elapsedSeconds)}</div>
         </div>
         <div className="h-2 overflow-hidden rounded bg-slate-100">
-          <div className="h-full rounded bg-accent transition-all duration-500" style={{ width: `${progress.percent}%` }} />
+          <div className="h-full rounded bg-accent transition-all duration-500" style={{ width: `${percent}%` }} />
         </div>
-        <p className="mt-2 text-xs text-slate-500">进度按 TradingAgents 的执行流程估算，报告返回后会自动切换为完整结果。</p>
+        <p className="mt-2 text-xs text-slate-500">
+          {job ? `任务编号 #${job.id}，后台限制并发运行，多余请求会自动排队。` : "进度按 TradingAgents 的执行流程估算，报告返回后会自动切换为完整结果。"}
+        </p>
       </div>
 
       <div className="grid gap-2 md:grid-cols-2">
         {tradingAgentProgressSteps.map((step, index) => {
-          const status = index < progress.index ? "已完成" : index === progress.index ? "进行中" : "等待中";
-          const active = index === progress.index;
-          const done = index < progress.index;
+          const sectionKey = progressStepSectionKeys[index];
+          const section = sectionKey ? sectionMap.get(sectionKey) : null;
+          const done = section?.status === "completed" || Boolean(section?.content?.trim()) || (!job && index < progress.index);
+          const active = job
+            ? !done && job.status === "running" && percent >= Math.max(3, index * 10)
+            : index === progress.index;
+          const status = done ? "已完成" : active ? "进行中" : "等待中";
           return (
             <div
               key={step.title}
@@ -1103,6 +1248,21 @@ function TradingAgentsProgress({ elapsedSeconds }: { elapsedSeconds: number }) {
           );
         })}
       </div>
+
+      {completedSections.length > 0 && (
+        <div className="space-y-3 border-t border-line pt-4">
+          <div className="text-sm font-semibold text-ink">已生成内容</div>
+          {completedSections.map((section) => (
+            <article key={section.section_key} className="rounded border border-line bg-slate-50 p-3">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-semibold text-ink">{section.title || agentSectionTitle(section.section_key)}</h3>
+                <span className="text-xs text-emerald-700">已保存</span>
+              </div>
+              <p className="max-h-60 overflow-auto whitespace-pre-wrap text-sm leading-7 text-slate-700">{section.content}</p>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

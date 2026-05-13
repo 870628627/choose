@@ -63,6 +63,8 @@ copy .env.example server\.env
 - `FINNHUB_API_KEY`：美股市场讨论 / 社交情绪优先数据源；未配置时自动降级到 StockTwits / Reddit / Yahoo Finance
 - `OPENAI_API_KEY`、`DEEPSEEK_API_KEY`：TradingAgents 模型密钥配置
 - `TRADINGAGENTS_LLM_PROVIDER`：默认 `deepseek`；如需 OpenAI 可改为 `openai`
+- `TRADINGAGENTS_MAX_CONCURRENT_JOBS`：TradingAgents 报告全站并发数，默认 `1`，小 ECS 建议保持 1
+- `TRADINGAGENTS_MAX_QUEUED_PER_USER`：单个用户最多排队 / 运行中的报告数，默认 `3`
 - `TRADINGAGENTS_ENABLE_LEGACY_US_SOCIAL`：是否启用 StockTwits / Reddit 公共抓取，默认 `0`
 - `TRADINGAGENTS_ENABLE_SENTIMENT_YFINANCE_NEWS`：是否在情绪分析阶段额外预取 Yahoo Finance 新闻，默认 `0`
 
@@ -102,7 +104,7 @@ python data-worker/worker.py fetch_announcements --code 600519
 python data-worker/worker.py sync_all --codes 600519,000001
 ```
 
-所有命令输出 JSON，供后端调用。
+所有普通命令输出 JSON，供后端调用。`run_tradingagents_report_events` 输出 NDJSON 事件流，供报告队列分段保存和进度可视化使用。
 
 ## 风险边界
 

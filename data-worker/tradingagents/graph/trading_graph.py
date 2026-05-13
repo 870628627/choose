@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 import json
 from datetime import datetime, timedelta
-from typing import Dict, Any, Tuple, List, Optional
+from typing import Dict, Any, Tuple, List, Optional, Callable
 
 import yfinance as yf
 
@@ -329,6 +329,31 @@ class TradingAgentsGraph:
                 self._checkpointer_ctx = None
                 self.graph = self.workflow.compile()
 
+    def propagate_with_progress(
+        self,
+        company_name,
+        trade_date,
+        on_update: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    ):
+        """Run the graph and emit partial report sections as nodes complete."""
+        self.ticker = company_name
+        self._resolve_pending_entries(company_name)
+
+        if self.config.get("checkpoint_enabled"):
+            self._checkpointer_ctx = get_checkpointer(
+                self.config["data_cache_dir"], company_name
+            )
+            saver = self._checkpointer_ctx.__enter__()
+            self.graph = self.workflow.compile(checkpointer=saver)
+
+        try:
+            return self._run_graph_with_progress(company_name, trade_date, on_update)
+        finally:
+            if self._checkpointer_ctx is not None:
+                self._checkpointer_ctx.__exit__(None, None, None)
+                self._checkpointer_ctx = None
+                self.graph = self.workflow.compile()
+
     def _run_graph(self, company_name, trade_date):
         """Execute the graph and write the resulting state to disk and memory log."""
         # Initialize state — inject memory log context for PM.
@@ -377,6 +402,107 @@ class TradingAgentsGraph:
             clear_checkpoint(
                 self.config["data_cache_dir"], company_name, str(trade_date)
             )
+
+        return final_state, self.process_signal(final_state["final_trade_decision"])
+
+    def _run_graph_with_progress(
+        self,
+        company_name,
+        trade_date,
+        on_update: Optional[Callable[[str, Dict[str, Any]], None]] = None,
+    ):
+        """Execute the graph through ``stream`` and surface section-level updates."""
+        past_context = self.memory_log.get_past_context(company_name)
+        init_agent_state = self.propagator.create_initial_state(
+            company_name, trade_date, past_context=past_context
+        )
+        args = self.propagator.get_graph_args()
+
+        if self.config.get("checkpoint_enabled"):
+            tid = thread_id(company_name, str(trade_date))
+            args.setdefault("config", {}).setdefault("configurable", {})["thread_id"] = tid
+
+        if on_update:
+            on_update("stage", {"title": "启动 TradingAgents", "percent": 5})
+
+        section_progress = {
+            "market_report": 18,
+            "sentiment_report": 30,
+            "news_report": 42,
+            "fundamentals_report": 54,
+            "investment_debate": 66,
+            "research_plan": 74,
+            "trader_plan": 82,
+            "risk_debate": 90,
+            "risk_review": 95,
+            "final_trade_decision": 98,
+        }
+        section_titles = {
+            "market_report": "行情与技术面",
+            "sentiment_report": "市场情绪",
+            "news_report": "新闻与公告线索",
+            "fundamentals_report": "基本面研究",
+            "investment_debate": "多空辩论",
+            "research_plan": "研究经理交易摘要",
+            "trader_plan": "交易员方案",
+            "risk_debate": "风险团队辩论",
+            "risk_review": "风险经理结论",
+            "final_trade_decision": "最终交易决策",
+        }
+        emitted = {}
+        state = dict(init_agent_state)
+
+        def emit_section(section_key: str, content: Any):
+            text = "" if content is None else str(content)
+            if not text.strip() or emitted.get(section_key) == text:
+                return
+            emitted[section_key] = text
+            if on_update:
+                on_update(
+                    "section",
+                    {
+                        "section_key": section_key,
+                        "title": section_titles[section_key],
+                        "content": text,
+                        "status": "completed",
+                        "percent": section_progress[section_key],
+                    },
+                )
+
+        for chunk in self.graph.stream(init_agent_state, **args):
+            if isinstance(chunk, dict):
+                state.update(chunk)
+
+            emit_section("market_report", state.get("market_report", ""))
+            emit_section("sentiment_report", state.get("sentiment_report", ""))
+            emit_section("news_report", state.get("news_report", ""))
+            emit_section("fundamentals_report", state.get("fundamentals_report", ""))
+
+            investment_state = state.get("investment_debate_state", {}) or {}
+            risk_state = state.get("risk_debate_state", {}) or {}
+            emit_section("investment_debate", investment_state.get("history", ""))
+            emit_section("research_plan", state.get("investment_plan", ""))
+            emit_section("trader_plan", state.get("trader_investment_plan", ""))
+            emit_section("risk_debate", risk_state.get("history", ""))
+            emit_section("risk_review", risk_state.get("judge_decision", ""))
+            emit_section("final_trade_decision", state.get("final_trade_decision", ""))
+
+        final_state = state
+        self.curr_state = final_state
+        self._log_state(trade_date, final_state)
+        self.memory_log.store_decision(
+            ticker=company_name,
+            trade_date=trade_date,
+            final_trade_decision=final_state["final_trade_decision"],
+        )
+
+        if self.config.get("checkpoint_enabled"):
+            clear_checkpoint(
+                self.config["data_cache_dir"], company_name, str(trade_date)
+            )
+
+        if on_update:
+            on_update("stage", {"title": "报告已完成", "percent": 100})
 
         return final_state, self.process_signal(final_state["final_trade_decision"])
 

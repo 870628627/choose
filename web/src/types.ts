@@ -63,3 +63,35 @@ export type ReportRecord = {
   created_at: string;
   report: TradingAgentsReport;
 };
+
+export type ReportJobSection = {
+  section_key: keyof TradingAgentsReport["sections"] | string;
+  title: string;
+  status: "pending" | "running" | "completed" | "failed" | string;
+  content: string;
+  sort_order: number;
+  started_at?: string;
+  completed_at?: string;
+  updated_at?: string;
+};
+
+export type ReportJob = {
+  id: number;
+  asset_type: ReportRecord["asset_type"];
+  code: string;
+  symbol: string;
+  display_name?: string;
+  trade_date: string;
+  status: "queued" | "running" | "completed" | "failed";
+  progress_percent: number;
+  current_stage: string;
+  error?: string;
+  report_id?: number | null;
+  queue_position: number;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at: string;
+  sections: ReportJobSection[];
+  report_record?: ReportRecord | null;
+};

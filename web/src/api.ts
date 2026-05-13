@@ -1,4 +1,4 @@
-import type { AuthSession, AuthUser, ReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
+import type { AuthSession, AuthUser, ReportJob, ReportRecord, StockDetail, StockListItem } from "./types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 const tokenKey = "alphascope_token";
@@ -63,6 +63,9 @@ export const api = {
   me: () => request<{ user: AuthUser }>("/api/auth/me"),
   reports: (assetType?: ReportRecord["asset_type"]) =>
     request<ReportRecord[]>(assetType ? `/api/reports?asset_type=${encodeURIComponent(assetType)}` : "/api/reports"),
+  reportJobs: (assetType?: ReportRecord["asset_type"]) =>
+    request<ReportJob[]>(assetType ? `/api/report-jobs?asset_type=${encodeURIComponent(assetType)}` : "/api/report-jobs"),
+  reportJob: (id: number) => request<ReportJob>(`/api/report-jobs/${id}`),
   deleteReport: (id: number) =>
     request<{ ok: true }>(`/api/reports/${id}`, {
       method: "DELETE"
@@ -86,13 +89,13 @@ export const api = {
       body: JSON.stringify(code ? { code } : {})
     }),
   tradingAgentsReport: (code: string) =>
-    request<TradingAgentsReport>(`/api/stocks/${code}/tradingagents-report`, {
+    request<ReportJob>(`/api/stocks/${code}/tradingagents-report`, {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify({})
     }),
   tradingAgentsSymbolReport: (symbol: string) =>
-    request<TradingAgentsReport>("/api/tradingagents-report", {
+    request<ReportJob>("/api/tradingagents-report", {
       method: "POST",
       headers: jsonHeaders,
       body: JSON.stringify({ symbol })

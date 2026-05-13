@@ -5,6 +5,7 @@ import { z } from "zod";
 import { bearerToken, createSession, createUser, requireAuth, revokeSession, verifyUser } from "./auth.js";
 import { addUserStock, db, getStockByCode, getUserStockByCode, listStocks, listUserStockCodes, removeUserStock } from "./db.js";
 import { runDataWorker } from "./dataWorker.js";
+import { createReportJob, getReportJobForUser, initializeReportJobQueue, listReportJobsForUser } from "./reportJobs.js";
 import { createResearchScore } from "./scoring.js";
 import type { AuthenticatedRequest } from "./auth.js";
 import type { TradingAgentsReport, WorkerStockBasic, WorkerStockPayload } from "./types.js";
@@ -43,27 +44,11 @@ const authSchema = z.object({
 });
 const loginSchema = authSchema;
 
-function tradingAgentsTimeoutMs() {
-  return Number(process.env.TRADINGAGENTS_REPORT_TIMEOUT_MS || 900000);
-}
-
 function assetTypeForSymbol(symbol: string) {
   const normalized = symbol.trim().toUpperCase();
   if (/^\d{6}$/.test(normalized) || /^\d{6}\.(SS|SZ|SH)$/.test(normalized)) return "a-share";
   if (normalized.endsWith("-USD") || normalized.endsWith("-USDT")) return "crypto";
   return "us";
-}
-
-function saveTradingReport(userId: number, assetType: string, report: TradingAgentsReport, displayName?: string) {
-  const result = db
-    .prepare(
-      `
-      INSERT INTO trading_reports (user_id, asset_type, symbol, display_name, trade_date, report_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `
-    )
-    .run(userId, assetType, report.symbol || report.code, displayName || null, report.trade_date, JSON.stringify(report));
-  return Number(result.lastInsertRowid);
 }
 
 function reportRow(row: Record<string, unknown>) {
@@ -279,6 +264,22 @@ app.delete("/api/reports/:id", requireAuth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/report-jobs", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  const assetType = typeof req.query.asset_type === "string" ? req.query.asset_type : "";
+  res.json(listReportJobsForUser(user.id, assetType));
+});
+
+app.get("/api/report-jobs/:id", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  const job = getReportJobForUser(Number(req.params.id), user.id);
+  if (!job) {
+    res.status(404).json({ error: "Report job not found" });
+    return;
+  }
+  res.json(job);
+});
+
 app.get("/api/stocks", requireAuth, (req, res) => {
   const user = (req as AuthenticatedRequest).user;
   res.json(listStocks(user.id).map((item) => withParsedRiskTags(item as Record<string, unknown>)));
@@ -375,15 +376,15 @@ app.post("/api/stocks/:code/tradingagents-report", requireAuth, async (req, res,
     }
 
     const body = tradingAgentsReportSchema.parse(req.body ?? {});
-    const args: Record<string, string> = { code: stock.code };
-    if (body.trade_date) args.trade_date = body.trade_date;
-
-    const report = await runDataWorker<TradingAgentsReport>("run_tradingagents_report", args, {
-      strict: true,
-      timeoutMs: tradingAgentsTimeoutMs()
+    const job = createReportJob({
+      userId: user.id,
+      assetType: "a-share",
+      code: stock.code,
+      symbol: stock.code,
+      displayName: stock.name,
+      tradeDate: body.trade_date
     });
-    const recordId = saveTradingReport(user.id, "a-share", report, stock.name);
-    res.json({ ...report, record_id: recordId });
+    res.status(202).json(job);
   } catch (error) {
     next(error);
   }
@@ -394,15 +395,14 @@ app.post("/api/tradingagents-report", requireAuth, async (req, res, next) => {
     const user = (req as AuthenticatedRequest).user;
     const body = globalTradingAgentsReportSchema.parse(req.body ?? {});
     const symbol = body.symbol.trim().toUpperCase();
-    const args: Record<string, string> = { code: symbol };
-    if (body.trade_date) args.trade_date = body.trade_date;
-
-    const report = await runDataWorker<TradingAgentsReport>("run_tradingagents_report", args, {
-      strict: true,
-      timeoutMs: tradingAgentsTimeoutMs()
+    const job = createReportJob({
+      userId: user.id,
+      assetType: assetTypeForSymbol(symbol),
+      code: symbol,
+      symbol,
+      tradeDate: body.trade_date
     });
-    const recordId = saveTradingReport(user.id, assetTypeForSymbol(symbol), report);
-    res.json({ ...report, record_id: recordId });
+    res.status(202).json(job);
   } catch (error) {
     next(error);
   }
@@ -592,8 +592,13 @@ app.post("/api/sync", requireAuth, async (req, res, next) => {
 
 app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const message = error instanceof z.ZodError ? error.issues.map((issue) => issue.message).join("; ") : (error as Error).message;
-  res.status(400).json({ error: message || "Unknown error" });
+  const statusCode = typeof (error as Error & { statusCode?: unknown }).statusCode === "number"
+    ? Number((error as Error & { statusCode: number }).statusCode)
+    : 400;
+  res.status(statusCode).json({ error: message || "Unknown error" });
 });
+
+initializeReportJobQueue();
 
 const server = app.listen(port, () => {
   console.log(`AlphaScope server listening on http://localhost:${port}`);

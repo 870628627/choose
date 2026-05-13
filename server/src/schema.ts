@@ -51,6 +51,47 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash);
     CREATE INDEX IF NOT EXISTS idx_trading_reports_user_created ON trading_reports(user_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS report_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      asset_type TEXT NOT NULL,
+      code TEXT NOT NULL,
+      symbol TEXT NOT NULL,
+      display_name TEXT,
+      trade_date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      progress_percent INTEGER NOT NULL DEFAULT 0,
+      current_stage TEXT NOT NULL DEFAULT '排队中',
+      error TEXT,
+      report_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      started_at TEXT,
+      completed_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(report_id) REFERENCES trading_reports(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_report_jobs_user_created ON report_jobs(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_report_jobs_status_created ON report_jobs(status, created_at ASC);
+
+    CREATE TABLE IF NOT EXISTS report_job_sections (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      job_id INTEGER NOT NULL,
+      section_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      content TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT,
+      completed_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(job_id) REFERENCES report_jobs(id) ON DELETE CASCADE,
+      UNIQUE(job_id, section_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_report_job_sections_job_order ON report_job_sections(job_id, sort_order);
+
     CREATE TABLE IF NOT EXISTS stocks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT NOT NULL UNIQUE,

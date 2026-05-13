@@ -7,6 +7,11 @@ type DataWorkerOptions = {
   strict?: boolean;
 };
 
+export type DataWorkerEvent = {
+  type: string;
+  [key: string]: unknown;
+};
+
 export async function runDataWorker<T>(task: string, args: Record<string, string> = {}, options: DataWorkerOptions = {}) {
   const python = process.env.DATA_WORKER_PYTHON || "python";
   const workerPath = path.resolve(process.cwd(), process.env.DATA_WORKER_PATH || "../data-worker/worker.py");
@@ -91,6 +96,92 @@ export async function runDataWorker<T>(task: string, args: Record<string, string
         console.warn(`${message}; using fallback`);
         finish(fallbackWorker(task, args) as T);
       }
+    });
+  });
+}
+
+export async function runDataWorkerEvents(
+  task: string,
+  args: Record<string, string>,
+  onEvent: (event: DataWorkerEvent) => void,
+  options: DataWorkerOptions = {}
+) {
+  const python = process.env.DATA_WORKER_PYTHON || "python";
+  const workerPath = path.resolve(process.cwd(), process.env.DATA_WORKER_PATH || "../data-worker/worker.py");
+  const params = [workerPath, task];
+
+  for (const [key, value] of Object.entries(args)) {
+    params.push(`--${key}`, value);
+  }
+
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn(python, params, {
+      cwd: process.cwd(),
+      env: process.env,
+      windowsHide: true
+    });
+
+    let stdoutBuffer = "";
+    let stderr = "";
+    let settled = false;
+
+    const fail = (message: string) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(new Error(message));
+    };
+
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve();
+    };
+
+    const parseLine = (line: string) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+      try {
+        onEvent(JSON.parse(trimmed) as DataWorkerEvent);
+      } catch (error) {
+        fail(`data-worker ${task} returned invalid event JSON: ${(error as Error).message}`);
+      }
+    };
+
+    const timer = setTimeout(() => {
+      child.kill();
+      fail(`data-worker ${task} timed out`);
+    }, options.timeoutMs ?? Number(process.env.DATA_WORKER_TIMEOUT_MS || 60000));
+
+    child.stdout.on("data", (chunk) => {
+      stdoutBuffer += chunk.toString();
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const line = stdoutBuffer.slice(0, newlineIndex);
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        parseLine(line);
+        newlineIndex = stdoutBuffer.indexOf("\n");
+      }
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", (error) => {
+      fail(error.message);
+    });
+
+    child.on("close", (code) => {
+      if (settled) return;
+      if (stdoutBuffer.trim()) parseLine(stdoutBuffer);
+      if (settled) return;
+      if (code !== 0) {
+        fail(stderr || `data-worker exited with code ${code}`);
+        return;
+      }
+      finish();
     });
   });
 }

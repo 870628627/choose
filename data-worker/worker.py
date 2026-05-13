@@ -504,9 +504,38 @@ def is_model_network_error(error: BaseException) -> bool:
     return any(token in text for token in tokens)
 
 
-def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dict[str, Any]:
-    import contextlib
+def build_tradingagents_report(
+    code: str,
+    symbol: str,
+    report_date: str,
+    final_state: Dict[str, Any],
+    decision: Any,
+) -> Dict[str, Any]:
+    investment_state = final_state.get("investment_debate_state", {})
+    risk_state = final_state.get("risk_debate_state", {})
+    return {
+        "code": code,
+        "symbol": symbol,
+        "trade_date": report_date,
+        "language": "Chinese",
+        "decision_signal": decision,
+        "sections": {
+            "market_report": final_state.get("market_report", ""),
+            "sentiment_report": final_state.get("sentiment_report", ""),
+            "news_report": final_state.get("news_report", ""),
+            "fundamentals_report": final_state.get("fundamentals_report", ""),
+            "investment_debate": investment_state.get("history", ""),
+            "research_plan": final_state.get("investment_plan", ""),
+            "trader_plan": final_state.get("trader_investment_plan", ""),
+            "risk_debate": risk_state.get("history", ""),
+            "risk_review": risk_state.get("judge_decision", ""),
+            "final_trade_decision": final_state.get("final_trade_decision", "")
+        },
+        "risk_notice": "本报告可以包含荐股观点、交易方案、目标价或涨跌判断；所有结论均由模型基于可得数据生成，可能错误或滞后。实际交易请自行确认数据、控制仓位并承担风险。"
+    }
 
+
+def prepare_tradingagents_run(code: str, trade_date: Optional[str] = None):
     os.environ.setdefault("TRADINGAGENTS_OUTPUT_LANGUAGE", "Chinese")
 
     try:
@@ -533,6 +562,13 @@ def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dic
     ]
     symbol = yahoo_a_share_symbol(code)
     report_date = trade_date or date.today().isoformat()
+    return TradingAgentsGraph, config, analysts, symbol, report_date
+
+
+def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dict[str, Any]:
+    import contextlib
+
+    TradingAgentsGraph, config, analysts, symbol, report_date = prepare_tradingagents_run(code, trade_date)
 
     # Keep stdout as clean JSON for the Node caller; TradingAgents traces and
     # provider warnings are routed to stderr.
@@ -553,28 +589,44 @@ def run_tradingagents_report(code: str, trade_date: Optional[str] = None) -> Dic
                 )
             raise
 
-    investment_state = final_state.get("investment_debate_state", {})
-    risk_state = final_state.get("risk_debate_state", {})
-    return {
-        "code": code,
-        "symbol": symbol,
-        "trade_date": report_date,
-        "language": "Chinese",
-        "decision_signal": decision,
-        "sections": {
-            "market_report": final_state.get("market_report", ""),
-            "sentiment_report": final_state.get("sentiment_report", ""),
-            "news_report": final_state.get("news_report", ""),
-            "fundamentals_report": final_state.get("fundamentals_report", ""),
-            "investment_debate": investment_state.get("history", ""),
-            "research_plan": final_state.get("investment_plan", ""),
-            "trader_plan": final_state.get("trader_investment_plan", ""),
-            "risk_debate": risk_state.get("history", ""),
-            "risk_review": risk_state.get("judge_decision", ""),
-            "final_trade_decision": final_state.get("final_trade_decision", "")
-        },
-        "risk_notice": "本报告可以包含荐股观点、交易方案、目标价或涨跌判断；所有结论均由模型基于可得数据生成，可能错误或滞后。实际交易请自行确认数据、控制仓位并承担风险。"
-    }
+    return build_tradingagents_report(code, symbol, report_date, final_state, decision)
+
+
+def run_tradingagents_report_events(code: str, trade_date: Optional[str] = None) -> None:
+    import contextlib
+
+    output = getattr(sys, "__stdout__", sys.stdout)
+
+    def emit_event(payload: Dict[str, Any]):
+        output.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        output.flush()
+
+    TradingAgentsGraph, config, analysts, symbol, report_date = prepare_tradingagents_run(code, trade_date)
+
+    def on_update(event_type: str, payload: Dict[str, Any]):
+        emit_event({"type": event_type, **payload})
+
+    with contextlib.redirect_stdout(sys.stderr):
+        try:
+            graph = TradingAgentsGraph(selected_analysts=analysts, debug=False, config=config)
+            final_state, decision = graph.propagate_with_progress(symbol, report_date, on_update=on_update)
+        except Exception as error:
+            if is_model_network_error(error):
+                provider = str(config.get("llm_provider", "openai"))
+                backend_url = config.get("backend_url") or "默认模型接口"
+                detail = summarize_exception_chain(error)
+                raise SystemExit(
+                    f"TradingAgents 无法连接模型服务（provider={provider}, backend_url={backend_url}）。"
+                    "当前 server 容器网络不可达或模型接口被阻断；请检查 ECS 出站网络、代理，"
+                    "或设置 TRADINGAGENTS_LLM_BACKEND_URL 指向服务器可访问的 OpenAI 兼容网关。"
+                    f"原始错误：{detail}"
+                )
+            raise
+
+    emit_event({
+        "type": "done",
+        "report": build_tradingagents_report(code, symbol, report_date, final_state, decision)
+    })
 
 
 def _to_float(value: Any):
@@ -612,6 +664,7 @@ def main():
         "fetch_financials",
         "fetch_announcements",
         "run_tradingagents_report",
+        "run_tradingagents_report_events",
         "sync_all"
     ])
     parser.add_argument("--code")
@@ -634,6 +687,8 @@ def main():
         emit(fetch_announcements(args.code))
     elif args.task == "run_tradingagents_report":
         emit(run_tradingagents_report(args.code, args.trade_date))
+    elif args.task == "run_tradingagents_report_events":
+        run_tradingagents_report_events(args.code, args.trade_date)
     elif args.task == "sync_all":
         codes = [code.strip() for code in (args.codes or "").split(",") if code.strip()]
         emit({"stocks": [sync_one(code) for code in codes]})
