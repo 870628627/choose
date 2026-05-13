@@ -41,7 +41,7 @@ const tradingAgentIntroductions = [
   { name: "行情技术 Agent", role: "读取价格、成交量和技术指标，判断趋势、波动和关键价位。" },
   { name: "情绪 Agent", role: "整理市场讨论和情绪信号，提示过热、分歧或冷清状态。" },
   { name: "新闻 Agent", role: "归纳近期新闻、公告和宏观线索，找出可能影响交易的事件。" },
-  { name: "基本面 Agent", role: "查看公司资料、财务质量和经营变化，形成基本面判断。" },
+  { name: "基本面 Agent", role: "查看公司资料、财务指标和经营变化，形成基本面判断。" },
   { name: "多空研究员", role: "分别提出看多和看空理由，再由研究经理形成交易摘要。" },
   { name: "交易与风控 Agent", role: "把研究结论转成交易方案，并由风险团队复核最终决策。" }
 ];
@@ -124,19 +124,6 @@ function getTradingAgentProgress(elapsedSeconds: number) {
   };
 }
 
-function Tags({ tags }: { tags?: string[] }) {
-  if (!tags?.length) return <span className="text-slate-500">暂无明显标签</span>;
-  return (
-    <div className="flex flex-wrap gap-2">
-      {tags.map((tag) => (
-        <span key={tag} className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800">
-          {tag}
-        </span>
-      ))}
-    </div>
-  );
-}
-
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="border-t border-line py-5">
@@ -144,6 +131,165 @@ function Section({ title, children }: { title: string; children: React.ReactNode
       {children}
     </section>
   );
+}
+
+function isMarkdownTableRow(line: string) {
+  return /^\s*\|.+\|\s*$/.test(line);
+}
+
+function isMarkdownTableSeparator(line: string) {
+  return /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line);
+}
+
+function isMarkdownBlockStart(line: string) {
+  return (
+    /^#{1,6}\s+/.test(line)
+    || /^[-*]\s+/.test(line)
+    || /^\d+\.\s+/.test(line)
+    || line.trim().startsWith("```")
+    || isMarkdownTableRow(line)
+  );
+}
+
+function splitMarkdownCells(line: string) {
+  let value = line.trim();
+  if (value.startsWith("|")) value = value.slice(1);
+  if (value.endsWith("|")) value = value.slice(0, -1);
+  return value.split("|").map((cell) => cell.trim());
+}
+
+function renderInlineMarkdown(text: string) {
+  return text.split(/(\*\*[^*]+?\*\*|`[^`]+?`)/g).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index} className="font-semibold text-ink">{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={index} className="rounded bg-slate-100 px-1 py-0.5 font-mono text-[.92em] text-slate-800">{part.slice(1, -1)}</code>;
+    }
+    return <span key={index}>{part}</span>;
+  });
+}
+
+function ReportMarkdown({ content }: { content: string }) {
+  const lines = content.replace(/\r\n/g, "\n").split("\n");
+  const blocks: React.ReactNode[] = [];
+  let index = 0;
+  let blockIndex = 0;
+
+  while (index < lines.length) {
+    const line = lines[index].trimEnd();
+    const trimmed = line.trim();
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (heading) {
+      const headingClass = heading[1].length <= 2
+        ? "mt-5 border-l-2 border-accent pl-3 text-base font-semibold text-ink first:mt-0"
+        : "mt-4 text-sm font-semibold text-slate-800";
+      blocks.push(
+        <h4 key={`heading-${blockIndex}`} className={headingClass}>
+          {renderInlineMarkdown(heading[2])}
+        </h4>
+      );
+      blockIndex += 1;
+      index += 1;
+      continue;
+    }
+
+    if (isMarkdownTableRow(line) && index + 1 < lines.length && isMarkdownTableSeparator(lines[index + 1])) {
+      const tableLines = [line];
+      index += 2;
+      while (index < lines.length && isMarkdownTableRow(lines[index])) {
+        tableLines.push(lines[index]);
+        index += 1;
+      }
+      const rows = tableLines.map(splitMarkdownCells);
+      const [headers, ...bodyRows] = rows;
+      blocks.push(
+        <div key={`table-${blockIndex}`} className="my-3 overflow-x-auto rounded border border-line">
+          <table className="report-table">
+            <thead>
+              <tr>{headers.map((cell, cellIndex) => <th key={cellIndex}>{renderInlineMarkdown(cell)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {bodyRows.map((row, rowIndex) => (
+                <tr key={rowIndex}>
+                  {headers.map((_, cellIndex) => <td key={cellIndex}>{renderInlineMarkdown(row[cellIndex] || "")}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      blockIndex += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <ul key={`list-${blockIndex}`} className="my-2 space-y-1.5 pl-5 text-sm leading-7 text-slate-700">
+          {items.map((item, itemIndex) => <li key={itemIndex} className="list-disc">{renderInlineMarkdown(item)}</li>)}
+        </ul>
+      );
+      blockIndex += 1;
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items = [];
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <ol key={`ordered-${blockIndex}`} className="my-2 space-y-1.5 pl-5 text-sm leading-7 text-slate-700">
+          {items.map((item, itemIndex) => <li key={itemIndex} className="list-decimal">{renderInlineMarkdown(item)}</li>)}
+        </ol>
+      );
+      blockIndex += 1;
+      continue;
+    }
+
+    if (trimmed.startsWith("```")) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !lines[index].trim().startsWith("```")) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      blocks.push(
+        <pre key={`code-${blockIndex}`} className="my-3 overflow-x-auto rounded border border-line bg-slate-950 p-3 text-xs leading-6 text-slate-100">
+          <code>{codeLines.join("\n")}</code>
+        </pre>
+      );
+      blockIndex += 1;
+      continue;
+    }
+
+    const paragraphLines = [trimmed];
+    index += 1;
+    while (index < lines.length && lines[index].trim() && !isMarkdownBlockStart(lines[index])) {
+      paragraphLines.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(
+      <p key={`paragraph-${blockIndex}`} className="my-2 text-sm leading-7 text-slate-700">
+        {renderInlineMarkdown(paragraphLines.join(" "))}
+      </p>
+    );
+    blockIndex += 1;
+  }
+
+  return <div className="report-prose">{blocks}</div>;
 }
 
 function AuthLoading() {
@@ -806,7 +952,7 @@ function AShareView({
       <section className="border-b border-line pb-5">
         <div className="mb-4">
           <h2 className="text-xl font-semibold text-ink">A股自选研究</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-600">维护 A 股自选池，查看本地数据、评分和 TradingAgents 中文报告。</p>
+          <p className="mt-1 text-sm leading-6 text-slate-600">维护 A 股自选池，查看本地数据和 TradingAgents 中文报告。</p>
         </div>
         <div className="flex flex-col gap-3 md:flex-row md:items-end">
           <label className="flex-1">
@@ -872,8 +1018,6 @@ function AShareView({
                 <th>收盘价</th>
                 <th>PE_TTM</th>
                 <th>PB</th>
-                <th>研究评分</th>
-                <th>风险标签</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -890,8 +1034,6 @@ function AShareView({
                   <td>{formatNumber(stock.close_price)}</td>
                   <td>{formatNumber(stock.pe_ttm)}</td>
                   <td>{formatNumber(stock.pb)}</td>
-                  <td>{stock.total_score ?? "-"}</td>
-                  <td><Tags tags={stock.risk_tags} /></td>
                   <td>
                     <div className="flex gap-2">
                       <button
@@ -917,7 +1059,7 @@ function AShareView({
               ))}
               {!stocks.length && (
                 <tr>
-                  <td colSpan={9} className="text-center text-slate-500">先添加一只 A 股开始研究。</td>
+                  <td colSpan={7} className="text-center text-slate-500">先添加一只 A 股开始研究。</td>
                 </tr>
               )}
             </tbody>
@@ -928,23 +1070,20 @@ function AShareView({
       {detail && (
         <>
           <Section title="当前自选详情">
-            <div className="grid gap-4 md:grid-cols-5">
-              <div className="rounded border border-line bg-white p-4 md:col-span-2">
+            <div className="grid gap-4 md:grid-cols-[1.4fr_.9fr]">
+              <div className="rounded border border-line bg-white p-4">
                 <h2 className="text-xl font-semibold">
                   {detail.stock.name} <span className="font-mono text-base text-slate-500">{detail.stock.code}</span>
                 </h2>
                 <p className="mt-2 text-sm text-slate-600">{detail.stock.company_profile}</p>
                 <div className="mt-3 text-sm text-slate-700">市场：{detail.stock.market} ｜ 行业：{detail.stock.industry || "-"}</div>
               </div>
-              <div className="rounded border border-line bg-white p-4 md:col-span-3">
-                <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-                  <Metric label="研究评分" value={detail.score?.total_score ?? "-"} />
-                  <Metric label="行业前景" value={detail.score?.industry_outlook ?? "-"} />
-                  <Metric label="竞争力" value={detail.score?.company_competitiveness ?? "-"} />
-                  <Metric label="财务质量" value={detail.score?.financial_quality ?? "-"} />
-                  <Metric label="风险控制" value={detail.score?.risk_control ?? "-"} />
-                </div>
-                <div className="mt-3"><Tags tags={detail.score?.risk_tags} /></div>
+              <div className="rounded border border-line bg-white p-4">
+                <div className="text-sm font-semibold text-ink">报告对象</div>
+                <div className="mt-2 font-mono text-2xl font-semibold text-accent">{selectedCode}</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  点击生成后会进入任务队列，完成的 agent 分段会自动保存并展示。
+                </p>
               </div>
             </div>
             <div className="mt-4 flex flex-wrap gap-2">
@@ -1249,41 +1388,55 @@ function ReportHistory({
   );
 }
 
-function Metric({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div className="border-l-2 border-accent pl-3">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="text-lg font-semibold text-ink">{String(value)}</div>
-    </div>
-  );
-}
-
 function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsReport; onExport: () => void }) {
+  const sectionEntries = Object.entries(report.sections).filter(([, value]) => Boolean(value?.trim()));
+
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 border-b border-line pb-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="flex flex-wrap gap-3 text-sm text-slate-600">
-          <span>代码：{report.code}</span>
-          <span>行情符号：{report.symbol}</span>
-          <span>分析日期：{report.trade_date}</span>
+    <div className="space-y-5">
+      <div className="overflow-hidden rounded border border-slate-800 bg-[#0d141b] text-slate-100">
+        <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="mb-2 text-xs uppercase tracking-[.22em] text-emerald-300">TradingAgents Research</div>
+            <h2 className="text-2xl font-semibold tracking-normal text-white">{report.code} 中文交易报告</h2>
+            <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-300">
+              <span className="rounded border border-white/10 bg-white/5 px-2.5 py-1">行情符号 {report.symbol}</span>
+              <span className="rounded border border-white/10 bg-white/5 px-2.5 py-1">分析日期 {report.trade_date}</span>
+              <span className="rounded border border-white/10 bg-white/5 px-2.5 py-1">{sectionEntries.length} 个分段</span>
+            </div>
+          </div>
+          <button
+            onClick={onExport}
+            className="inline-flex items-center justify-center gap-2 rounded border border-emerald-300/40 bg-emerald-300 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-200"
+            title="导出报告"
+          >
+            <Download size={16} />
+            导出报告
+          </button>
         </div>
-        <button
-          onClick={onExport}
-          className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent"
-          title="导出报告"
-        >
-          <Download size={16} />
-          导出报告
-        </button>
       </div>
-      {Object.entries(report.sections).map(([key, value]) => (
-        value ? (
-          <article key={key} className="border-t border-line pt-4">
-            <h3 className="mb-2 text-base font-semibold text-ink">{agentSectionTitle(key)}</h3>
-            <p className="whitespace-pre-wrap text-sm leading-7 text-slate-700">{value}</p>
+
+      <div className="grid gap-2 md:grid-cols-3">
+        {sectionEntries.map(([key]) => (
+          <a key={key} href={`#report-section-${key}`} className="rounded border border-line bg-slate-50 px-3 py-2 text-sm text-slate-700 hover:border-accent hover:text-accent">
+            {agentSectionTitle(key)}
+          </a>
+        ))}
+      </div>
+
+      <div className="space-y-5">
+        {sectionEntries.map(([key, value], index) => (
+          <article key={key} id={`report-section-${key}`} className="scroll-mt-4 border-t border-line pt-5">
+            <div className="mb-3 flex items-center gap-3">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded border border-accent/30 bg-teal-50 font-mono text-xs text-accent">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <h3 className="text-lg font-semibold text-ink">{agentSectionTitle(key)}</h3>
+            </div>
+            <ReportMarkdown content={String(value)} />
           </article>
-        ) : null
-      ))}
+        ))}
+      </div>
+
       <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm leading-6 text-amber-900">
         {report.risk_notice}
       </div>

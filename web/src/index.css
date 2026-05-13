@@ -38,3 +38,33 @@ textarea {
   font-weight: 600;
   background: #eef2f6;
 }
+
+.report-prose {
+  color: #334155;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.report-table th,
+.report-table td {
+  border-bottom: 1px solid #d8dee8;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.report-table th {
+  background: #eef2f6;
+  color: #334155;
+  font-weight: 650;
+}
+
+.report-table tbody tr:nth-child(even) {
+  background: #f8fafc;
+}
