@@ -8,7 +8,7 @@
 
 - 前端：React + Vite + TypeScript + Tailwind CSS
 - 后端：Node.js + Express + SQLite
-- 数据采集：Python data-worker；A 股行情优先 BaoStock，失败后回退东方财富 / AKShare；美股情绪优先 Finnhub，并补充富途 / 长桥中文公开讨论线索
+- 数据采集：Python data-worker；A 股行情优先 BaoStock，失败后回退东方财富 / AKShare；A 股情绪扫描东方财富股吧 / 雪球 / 同花顺公开页面；美股情绪优先 Finnhub，并补充富途 / 长桥中文公开讨论线索
 - LLM：网页端接入 TradingAgents 中文交易报告，支持 OpenAI / DeepSeek 等模型配置
 
 ## 目录

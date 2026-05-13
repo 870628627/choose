@@ -29,7 +29,7 @@ from tradingagents.agents.utils.agent_utils import (
     get_news,
 )
 from tradingagents.dataflows.a_share_data import is_a_share_symbol
-from tradingagents.dataflows.a_share_sentiment import fetch_eastmoney_guba_posts
+from tradingagents.dataflows.a_share_sentiment import fetch_a_share_public_discussion
 from tradingagents.dataflows.chinese_web_sentiment import fetch_chinese_us_stock_discussion
 from tradingagents.dataflows.finnhub_sentiment import fetch_finnhub_social_sentiment
 from tradingagents.dataflows.reddit import fetch_reddit_posts
@@ -67,13 +67,13 @@ def create_sentiment_analyst(llm):
                 if _env_enabled("TRADINGAGENTS_ENABLE_SENTIMENT_YFINANCE_NEWS")
                 else "<sentiment news prefetch disabled; A-share discussion uses Eastmoney Guba>"
             )
-            guba_block = fetch_eastmoney_guba_posts(ticker, limit=30)
+            discussion_block = fetch_a_share_public_discussion(ticker, limit=30)
             system_message = _build_a_share_system_message(
                 ticker=ticker,
                 start_date=start_date,
                 end_date=end_date,
                 news_block=news_block,
-                guba_block=guba_block,
+                discussion_block=discussion_block,
             )
         else:
             finnhub_block = fetch_finnhub_social_sentiment(ticker, start_date, end_date)
@@ -224,18 +224,18 @@ def _build_a_share_system_message(
     start_date: str,
     end_date: str,
     news_block: str,
-    guba_block: str,
+    discussion_block: str,
 ) -> str:
     return f"""You are an A-share market sentiment analyst. Your task is to produce a comprehensive sentiment report for {ticker} covering the period from {start_date} to {end_date}.
 
 ## Data sources (pre-fetched, in this prompt)
 
-### A-share discussion — Eastmoney Guba
-Retail-investor discussion source. Treat it as noisy, fast-moving public-market opinion. Do not invent X, Reddit, or StockTwits evidence for A shares.
+### A-share public discussion — Eastmoney Guba / Xueqiu / Tonghuashun
+Retail-investor discussion sources. Treat them as noisy, fast-moving public-market opinion. Do not invent X, Reddit, StockTwits, or login-only evidence for A shares.
 
-<start_of_eastmoney_guba>
-{guba_block}
-<end_of_eastmoney_guba>
+<start_of_a_share_public_discussion>
+{discussion_block}
+<end_of_a_share_public_discussion>
 
 ### News headlines — configured news vendor
 Use this block only when it contains real ticker-relevant headlines. If it is unavailable or sparse, say so clearly.
@@ -248,7 +248,7 @@ Use this block only when it contains real ticker-relevant headlines. If it is un
 
 1. Separate event facts from retail opinion.
 2. Weight discussion by visible engagement and repeated themes, not by a single post.
-3. Call out data gaps explicitly. If Eastmoney Guba or news data is unavailable, say the sentiment confidence is low.
+3. Call out data gaps explicitly. If Eastmoney/Xueqiu/Tonghuashun or news data is unavailable, say the sentiment confidence is low.
 4. Do not claim that public discussion predicts price. Frame it as one input beside technicals and fundamentals.
 
 ## Output
@@ -256,7 +256,7 @@ Use this block only when it contains real ticker-relevant headlines. If it is un
 Produce a sentiment report covering:
 
 1. Overall sentiment direction — Bullish / Bearish / Neutral / Mixed — with confidence based on source quality.
-2. Eastmoney Guba themes and notable repeated narratives.
+2. Eastmoney / Xueqiu / Tonghuashun themes and notable repeated narratives.
 3. News/event themes when available.
 4. Divergences, catalysts, and risks.
 5. A markdown table summarizing signals, direction, source, and evidence.
