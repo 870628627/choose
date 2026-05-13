@@ -62,6 +62,9 @@ copy .env.example server\.env
 - `TUSHARE_TOKEN`：预留 Tushare token
 - `FINNHUB_API_KEY`：美股市场讨论 / 社交情绪优先数据源；未配置时自动降级到 StockTwits / Reddit / Yahoo Finance
 - `OPENAI_API_KEY`、`DEEPSEEK_API_KEY`：TradingAgents 模型密钥配置
+- `TRADINGAGENTS_LLM_PROVIDER`：默认 `deepseek`；如需 OpenAI 可改为 `openai`
+- `TRADINGAGENTS_ENABLE_LEGACY_US_SOCIAL`：是否启用 StockTwits / Reddit 公共抓取，默认 `0`
+- `TRADINGAGENTS_ENABLE_SENTIMENT_YFINANCE_NEWS`：是否在情绪分析阶段额外预取 Yahoo Finance 新闻，默认 `0`
 
 ## 启动
 

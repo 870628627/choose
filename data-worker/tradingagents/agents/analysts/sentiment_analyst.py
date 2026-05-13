@@ -20,6 +20,7 @@ See: https://github.com/TauricResearch/TradingAgents/issues/557
 """
 
 from datetime import datetime, timedelta
+import os
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from tradingagents.agents.utils.agent_utils import (
@@ -39,6 +40,10 @@ def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
 
+def _env_enabled(name: str, default: str = "0") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def create_sentiment_analyst(llm):
     """Create a sentiment analyst node for the trading graph.
 
@@ -56,8 +61,12 @@ def create_sentiment_analyst(llm):
         # Pre-fetch all three sources. Each fetcher degrades gracefully and
         # returns a string (no exceptions surface from here), so the LLM
         # always sees something — either real data or a clear placeholder.
-        news_block = get_news.func(ticker, start_date, end_date)
         if is_a_share_symbol(ticker):
+            news_block = (
+                get_news.func(ticker, start_date, end_date)
+                if _env_enabled("TRADINGAGENTS_ENABLE_SENTIMENT_YFINANCE_NEWS")
+                else "<sentiment news prefetch disabled; A-share discussion uses Eastmoney Guba>"
+            )
             guba_block = fetch_eastmoney_guba_posts(ticker, limit=30)
             system_message = _build_a_share_system_message(
                 ticker=ticker,
@@ -69,8 +78,17 @@ def create_sentiment_analyst(llm):
         else:
             finnhub_block = fetch_finnhub_social_sentiment(ticker, start_date, end_date)
             chinese_web_block = fetch_chinese_us_stock_discussion(ticker)
-            stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
-            reddit_block = fetch_reddit_posts(ticker)
+            if _env_enabled("TRADINGAGENTS_ENABLE_LEGACY_US_SOCIAL"):
+                stocktwits_block = fetch_stocktwits_messages(ticker, limit=30, timeout=5.0)
+                reddit_block = fetch_reddit_posts(ticker, limit_per_sub=2, timeout=5.0, inter_request_delay=0.2)
+            else:
+                stocktwits_block = "<StockTwits public scrape disabled by default; set TRADINGAGENTS_ENABLE_LEGACY_US_SOCIAL=1 to enable>"
+                reddit_block = "<Reddit public scrape disabled by default; set TRADINGAGENTS_ENABLE_LEGACY_US_SOCIAL=1 to enable>"
+            news_block = (
+                get_news.func(ticker, start_date, end_date)
+                if _env_enabled("TRADINGAGENTS_ENABLE_SENTIMENT_YFINANCE_NEWS")
+                else "<Yahoo Finance news prefetch disabled in sentiment analyst; use the News analyst or Finnhub/news APIs for news>"
+            )
 
             system_message = _build_system_message(
                 ticker=ticker,
