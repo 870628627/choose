@@ -1734,6 +1734,8 @@ function AShareView({
         </div>
       </Section>
 
+      <ReportHistory assetType="a-share" refreshKey={historyVersion} />
+
       {detailLoading && !detail && (
         <Section title="当前自选详情">
           <div className="rounded border border-line bg-white p-4 text-sm text-slate-600">
@@ -1832,20 +1834,8 @@ function AShareView({
             </div>
           </Section>
 
-          <Section title="公告标题">
-            <div className="overflow-x-auto rounded border border-line bg-white">
-              <table className="data-table">
-                <thead><tr><th>日期</th><th>类型</th><th>标题</th></tr></thead>
-                <tbody>{detail.announcements.map((row) => (
-                  <tr key={String(row.id)}><td>{row.published_at}</td><td>{row.announcement_type}</td><td>{row.title}</td></tr>
-                ))}</tbody>
-              </table>
-            </div>
-          </Section>
         </>
       )}
-
-      <ReportHistory assetType="a-share" refreshKey={historyVersion} />
     </div>
   );
 }
