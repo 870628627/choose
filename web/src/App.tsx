@@ -87,6 +87,27 @@ function formatCompactNumber(value: unknown) {
   return number.toFixed(0);
 }
 
+const beijingDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
+  timeZone: "Asia/Shanghai",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  second: "2-digit",
+  hour12: false
+});
+
+function formatBeijingDateTime(value?: string | null) {
+  const raw = String(value || "").trim();
+  if (!raw) return "-";
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(raw);
+  const isoLike = raw.includes("T") ? raw : raw.replace(" ", "T");
+  const date = new Date(hasTimezone ? isoLike : `${isoLike}Z`);
+  if (Number.isNaN(date.getTime())) return raw;
+  return beijingDateTimeFormatter.format(date).replace(/\//g, "-");
+}
+
 function safeFileName(value: string) {
   return value.replace(/[\\/:*?"<>|]+/g, "-").replace(/\s+/g, "").slice(0, 80) || "report";
 }
@@ -1062,8 +1083,8 @@ function AdminView() {
                   <th>等级</th>
                   <th>报告数</th>
                   <th>运行任务</th>
-                  <th>最近在线</th>
-                  <th>创建时间</th>
+                  <th>最近在线（北京时间）</th>
+                  <th>创建时间（北京时间）</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -1082,8 +1103,8 @@ function AdminView() {
                     <td>{accountLevelLabel(user.account_level)}</td>
                     <td>{user.report_count}</td>
                     <td>{user.active_job_count}</td>
-                    <td>{user.last_seen_at || "-"}</td>
-                    <td>{user.created_at || "-"}</td>
+                    <td>{formatBeijingDateTime(user.last_seen_at)}</td>
+                    <td>{formatBeijingDateTime(user.created_at)}</td>
                     <td>
                       <select
                         value={user.account_level}
@@ -1142,7 +1163,7 @@ function AdminView() {
                   <th>类型</th>
                   <th>归属用户</th>
                   <th>分析日期</th>
-                  <th>生成时间</th>
+                  <th>生成时间（北京时间）</th>
                   <th>状态</th>
                   <th>操作</th>
                 </tr>
@@ -1157,7 +1178,7 @@ function AdminView() {
                     <td>{assetTypeLabels[record.asset_type]}</td>
                     <td className="font-mono text-xs text-slate-600">{record.owner_email || "-"}</td>
                     <td>{record.trade_date}</td>
-                    <td>{record.created_at}</td>
+                    <td>{formatBeijingDateTime(record.created_at)}</td>
                     <td>
                       <span className={`rounded border px-2 py-1 text-xs ${
                         record.is_showcased
