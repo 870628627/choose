@@ -1,4 +1,4 @@
-import type { AdminUser, AuthSession, AuthUser, ReportJob, ReportRecord, ReportSummary, ShowcaseReportRecord, StockDetail, StockListItem } from "./types";
+import type { AdminUser, AuthSession, AuthUser, ReportJob, ReportRecord, ReportSummary, ShowcaseReportRecord } from "./types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 const tokenKey = "alphascope_token";
@@ -95,30 +95,6 @@ export const api = {
   deleteReport: (id: number) =>
     request<{ ok: true }>(`/api/reports/${id}`, {
       method: "DELETE"
-    }),
-  listStocks: () => request<StockListItem[]>("/api/stocks"),
-  addStock: (code: string) =>
-    request<{ id: number; code: string }>("/api/stocks", {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({ code })
-    }),
-  deleteStock: (code: string) =>
-    request<{ ok: true }>(`/api/stocks/${code}`, {
-      method: "DELETE"
-    }),
-  getStock: (code: string) => request<StockDetail>(`/api/stocks/${code}`),
-  sync: (code?: string) =>
-    request<{ synced: number; message?: string }>("/api/sync", {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify(code ? { code } : {})
-    }),
-  tradingAgentsReport: (code: string) =>
-    request<ReportJob>(`/api/stocks/${code}/tradingagents-report`, {
-      method: "POST",
-      headers: jsonHeaders,
-      body: JSON.stringify({})
     }),
   tradingAgentsSymbolReport: (symbol: string) =>
     request<ReportJob>("/api/tradingagents-report", {

@@ -11,7 +11,6 @@ import {
   LogIn,
   LogOut,
   RefreshCw,
-  Search,
   ShieldCheck,
   Sparkles,
   Square,
@@ -20,7 +19,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { api, getAuthToken, setAuthToken } from "./api";
-import type { AdminUser, AuthSession, ReportJob, ReportRecord, ReportSummary, ShowcaseReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
+import type { AdminUser, AuthSession, ReportJob, ReportRecord, ReportSummary, ShowcaseReportRecord, TradingAgentsReport } from "./types";
 
 type View = "home" | "a-share" | "us" | "crypto" | "admin";
 
@@ -70,23 +69,6 @@ const progressStepSectionKeys = [
   "final_trade_decision"
 ];
 
-function formatNumber(value: unknown, digits = 2) {
-  if (value === null || value === undefined || value === "") return "-";
-  const number = Number(value);
-  if (Number.isNaN(number)) return String(value);
-  return number.toFixed(digits);
-}
-
-function formatCompactNumber(value: unknown) {
-  if (value === null || value === undefined || value === "") return "-";
-  const number = Number(value);
-  if (Number.isNaN(number)) return String(value);
-  const abs = Math.abs(number);
-  if (abs >= 100000000) return `${(number / 100000000).toFixed(1)}亿`;
-  if (abs >= 10000) return `${(number / 10000).toFixed(1)}万`;
-  return number.toFixed(0);
-}
-
 const beijingDateTimeFormatter = new Intl.DateTimeFormat("zh-CN", {
   timeZone: "Asia/Shanghai",
   year: "numeric",
@@ -106,6 +88,41 @@ function formatBeijingDateTime(value?: string | null) {
   const date = new Date(hasTimezone ? isoLike : `${isoLike}Z`);
   if (Number.isNaN(date.getTime())) return raw;
   return beijingDateTimeFormatter.format(date).replace(/\//g, "-");
+}
+
+function sanitizeAssetInput(assetType: ReportRecord["asset_type"], value: string) {
+  if (assetType === "a-share") return value.replace(/\D/g, "").slice(0, 6);
+  return value.toUpperCase().replace(/[^A-Z0-9._-]/g, "").slice(0, 32);
+}
+
+function isRunnableAssetSymbol(assetType: ReportRecord["asset_type"], value: string) {
+  const symbol = value.trim();
+  return assetType === "a-share" ? /^\d{6}$/.test(symbol) : Boolean(symbol);
+}
+
+function recentSearchKey(ownerKey: string, assetType: ReportRecord["asset_type"]) {
+  return `alphascope_recent_searches_${ownerKey}_${assetType}`;
+}
+
+function loadRecentSearches(ownerKey: string, assetType: ReportRecord["asset_type"]) {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(recentSearchKey(ownerKey, assetType)) || "[]");
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).slice(0, 10)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentSearches(ownerKey: string, assetType: ReportRecord["asset_type"], values: string[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(recentSearchKey(ownerKey, assetType), JSON.stringify(values.slice(0, 10)));
+  } catch {
+    // 本地存储不可用时不阻塞报告生成。
+  }
 }
 
 function safeFileName(value: string) {
@@ -690,15 +707,6 @@ export default function App() {
   const [view, setView] = useState<View>("home");
   const [session, setSession] = useState<AuthSession | null>(null);
   const [authReady, setAuthReady] = useState(false);
-  const [stocks, setStocks] = useState<StockListItem[]>([]);
-  const [selectedCode, setSelectedCode] = useState("");
-  const [message, setMessage] = useState("");
-
-  const loadStocks = async () => {
-    const data = (await api.listStocks()) as StockListItem[];
-    setStocks(data);
-    if (!selectedCode && data[0]) setSelectedCode(data[0].code);
-  };
 
   useEffect(() => {
     const token = getAuthToken();
@@ -715,15 +723,9 @@ export default function App() {
       .finally(() => setAuthReady(true));
   }, []);
 
-  useEffect(() => {
-    if (!session) return;
-    loadStocks().catch((error) => setMessage(error.message));
-  }, [session?.user.id]);
-
   const handleAuthenticated = (nextSession: AuthSession) => {
     setAuthToken(nextSession.token);
     setSession(nextSession);
-    setMessage("");
   };
 
   const logout = async () => {
@@ -734,8 +736,6 @@ export default function App() {
     }
     setAuthToken("");
     setSession(null);
-    setStocks([]);
-    setSelectedCode("");
     setView("home");
   };
 
@@ -754,7 +754,7 @@ export default function App() {
         <div className="mx-auto flex max-w-7xl flex-col gap-4 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-2xl font-semibold tracking-normal text-ink">AlphaScope 全球资产研究台</h1>
-            <p className="text-sm text-slate-600">Agent 研究、A股自选、美股报告和加密资产报告</p>
+            <p className="text-sm text-slate-600">Agent 研究、A股报告、美股报告和加密资产报告</p>
           </div>
           <nav className="flex flex-wrap gap-2">
             {navItems.map((item) => {
@@ -806,19 +806,15 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-5">
-        {message && (
-          <div className="mb-4 rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            {message}
-          </div>
-        )}
-
         {view === "home" && <HomeView />}
         {view === "a-share" && (
-          <AShareView
-            stocks={stocks}
-            selectedCode={selectedCode}
-            setSelectedCode={setSelectedCode}
-            reloadStocks={loadStocks}
+          <AssetReportPage
+            assetType="a-share"
+            title="A股 TradingAgents 报告"
+            description="输入 A 股代码直接生成中文交易研究报告。"
+            placeholder="例如 600519、300750、688213"
+            examples={["600519", "300750", "688213", "000001"]}
+            storageOwnerKey={String(session.user.id)}
           />
         )}
         {view === "us" && (
@@ -828,6 +824,7 @@ export default function App() {
             description="输入美股符号生成中文交易研究报告。"
             placeholder="例如 NVDA、AAPL、MSFT"
             examples={["NVDA", "AAPL", "MSFT", "TSLA"]}
+            storageOwnerKey={String(session.user.id)}
           />
         )}
         {view === "crypto" && (
@@ -837,6 +834,7 @@ export default function App() {
             description="输入加密资产符号生成中文交易研究报告。"
             placeholder="例如 BTC-USD、ETH-USD、SOL-USD"
             examples={["BTC-USD", "ETH-USD", "SOL-USD", "BNB-USD"]}
+            storageOwnerKey={String(session.user.id)}
           />
         )}
         {view === "admin" && session.user.is_super_admin && <AdminView />}
@@ -1227,21 +1225,28 @@ function AssetReportPage({
   title,
   description,
   placeholder,
-  examples
+  examples,
+  storageOwnerKey
 }: {
   assetType: ReportRecord["asset_type"];
   title: string;
   description: string;
   placeholder: string;
   examples: string[];
+  storageOwnerKey: string;
 }) {
   const [symbol, setSymbol] = useState("");
+  const [recentSearches, setRecentSearches] = useState<string[]>(() => loadRecentSearches(storageOwnerKey, assetType));
   const [report, setReport] = useState<TradingAgentsReport | null>(null);
   const [job, setJob] = useState<ReportJob | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [historyVersion, setHistoryVersion] = useState(0);
+
+  useEffect(() => {
+    setRecentSearches(loadRecentSearches(storageOwnerKey, assetType));
+  }, [assetType, storageOwnerKey]);
 
   useEffect(() => {
     if (!loading) return;
@@ -1286,14 +1291,22 @@ function AssetReportPage({
   }, [loading, job?.id]);
 
   const runReport = async (nextSymbol = symbol) => {
-    const normalized = nextSymbol.trim().toUpperCase();
-    if (!normalized) return;
+    const normalized = sanitizeAssetInput(assetType, nextSymbol).trim();
+    if (!isRunnableAssetSymbol(assetType, normalized)) {
+      setError(assetType === "a-share" ? "请输入 6 位 A 股代码。" : "请输入资产符号。");
+      return;
+    }
     setSymbol(normalized);
     setLoading(true);
     setError("");
     setReport(null);
     setJob(null);
     setElapsedSeconds(0);
+    setRecentSearches((current) => {
+      const nextSearches = [normalized, ...current.filter((item) => item !== normalized)].slice(0, 10);
+      saveRecentSearches(storageOwnerKey, assetType, nextSearches);
+      return nextSearches;
+    });
     try {
       const nextJob = await api.tradingAgentsSymbolReport(normalized);
       setJob(nextJob);
@@ -1334,10 +1347,10 @@ function AssetReportPage({
         </div>
         <div className="flex flex-col gap-3 md:flex-row md:items-end">
           <label className="flex-1">
-            <span className="mb-1 block text-sm font-medium text-slate-700">资产符号</span>
+            <span className="mb-1 block text-sm font-medium text-slate-700">资产代码 / 符号</span>
             <input
               value={symbol}
-              onChange={(event) => setSymbol(event.target.value.toUpperCase().replace(/[^A-Z0-9._-]/g, "").slice(0, 32))}
+              onChange={(event) => setSymbol(sanitizeAssetInput(assetType, event.target.value))}
               onKeyDown={(event) => {
                 if (event.key === "Enter") runReport();
               }}
@@ -1346,7 +1359,7 @@ function AssetReportPage({
             />
           </label>
           <button
-            disabled={loading || !symbol.trim()}
+            disabled={loading || !isRunnableAssetSymbol(assetType, symbol)}
             onClick={() => runReport()}
             className="inline-flex items-center justify-center gap-2 rounded border border-accent bg-accent px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -1354,16 +1367,37 @@ function AssetReportPage({
             {loading ? "生成中" : "生成报告"}
           </button>
         </div>
-        <div className="mt-3 flex flex-wrap gap-2">
-          {examples.map((example) => (
-            <button
-              key={example}
-              onClick={() => runReport(example)}
-              className="rounded border border-line bg-white px-3 py-1.5 text-sm text-slate-700 hover:border-accent hover:text-accent"
-            >
-              {example}
-            </button>
-          ))}
+        {recentSearches.length > 0 && (
+          <div className="mt-3">
+            <div className="mb-2 text-xs font-medium text-slate-500">最近搜索（最多10个）</div>
+            <div className="flex flex-wrap gap-2">
+              {recentSearches.map((item) => (
+                <button
+                  key={item}
+                  onClick={() => runReport(item)}
+                  disabled={loading}
+                  className="rounded border border-line bg-white px-3 py-1.5 font-mono text-sm text-slate-700 hover:border-accent hover:text-accent disabled:opacity-50"
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+        <div className="mt-3">
+          <div className="mb-2 text-xs font-medium text-slate-500">常用示例</div>
+          <div className="flex flex-wrap gap-2">
+            {examples.map((example) => (
+              <button
+                key={example}
+                onClick={() => runReport(example)}
+                disabled={loading}
+                className="rounded border border-line bg-white px-3 py-1.5 text-sm text-slate-700 hover:border-accent hover:text-accent disabled:opacity-50"
+              >
+                {example}
+              </button>
+            ))}
+          </div>
         </div>
       </section>
 
@@ -1394,448 +1428,6 @@ function AssetReportPage({
       </section>
 
       <ReportHistory assetType={assetType} refreshKey={historyVersion} />
-    </div>
-  );
-}
-
-function AShareView({
-  stocks,
-  selectedCode,
-  setSelectedCode,
-  reloadStocks
-}: {
-  stocks: StockListItem[];
-  selectedCode: string;
-  setSelectedCode: (code: string) => void;
-  reloadStocks: () => Promise<void>;
-}) {
-  const [code, setCode] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [detail, setDetail] = useState<StockDetail | null>(null);
-  const [detailCache, setDetailCache] = useState<Record<string, StockDetail>>({});
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [report, setReport] = useState<TradingAgentsReport | null>(null);
-  const [reportJob, setReportJob] = useState<ReportJob | null>(null);
-  const [reportLoading, setReportLoading] = useState(false);
-  const [reportError, setReportError] = useState("");
-  const [reportElapsedSeconds, setReportElapsedSeconds] = useState(0);
-  const [historyVersion, setHistoryVersion] = useState(0);
-
-  const fetchAndCacheDetail = async (codeToLoad: string) => {
-    const nextDetail = (await api.getStock(codeToLoad)) as StockDetail;
-    setDetailCache((current) => ({ ...current, [codeToLoad]: nextDetail }));
-    return nextDetail;
-  };
-
-  const loadDetail = async (codeToLoad = selectedCode) => {
-    if (!codeToLoad) {
-      setDetail(null);
-      return;
-    }
-    setDetailLoading(true);
-    try {
-      const nextDetail = await fetchAndCacheDetail(codeToLoad);
-      setDetail(nextDetail);
-    } finally {
-      setDetailLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    setReport(null);
-    setReportJob(null);
-    setReportError("");
-    setReportElapsedSeconds(0);
-    if (!selectedCode) {
-      setDetail(null);
-      setDetailLoading(false);
-      return;
-    }
-    const cached = detailCache[selectedCode];
-    if (cached) {
-      setDetail(cached);
-      setDetailLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-    setDetail(null);
-    setDetailLoading(true);
-    fetchAndCacheDetail(selectedCode)
-      .then((nextDetail) => {
-        if (!cancelled) setDetail(nextDetail);
-      })
-      .catch(() => {
-        if (!cancelled) setDetail(null);
-      })
-      .finally(() => {
-        if (!cancelled) setDetailLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedCode]);
-
-  useEffect(() => {
-    if (!reportLoading) return;
-    const timer = window.setInterval(() => {
-      setReportElapsedSeconds((current) => current + 1);
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [reportLoading]);
-
-  useEffect(() => {
-    if (!reportLoading || !reportJob) return;
-    let cancelled = false;
-    const poll = async () => {
-      try {
-        const nextJob = await api.reportJob(reportJob.id);
-        if (cancelled) return;
-        setReportJob(nextJob);
-        if (nextJob.status === "completed") {
-          setReport(nextJob.report_record?.report || null);
-          setHistoryVersion((current) => current + 1);
-          setReportLoading(false);
-        } else if (nextJob.status === "failed") {
-          setReportError(nextJob.error || "报告生成失败");
-          setReportLoading(false);
-        } else if (nextJob.status === "cancelled") {
-          setReportError(nextJob.error || "已停止生成");
-          setReportLoading(false);
-        }
-      } catch (requestError) {
-        if (!cancelled) {
-          setReportError((requestError as Error).message);
-          setReportLoading(false);
-        }
-      }
-    };
-    poll();
-    const timer = window.setInterval(poll, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [reportLoading, reportJob?.id]);
-
-  const addStock = async () => {
-    if (!/^\d{6}$/.test(code)) return;
-    setBusy(true);
-    try {
-      await api.addStock(code);
-      await api.sync(code);
-      await reloadStocks();
-      setSelectedCode(code);
-      setCode("");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const deleteStock = async (stock: StockListItem) => {
-    const confirmed = window.confirm(`确定从你的自选池删除 ${stock.code} ${stock.name} 吗？不会影响其他用户。`);
-    if (!confirmed) return;
-    setBusy(true);
-    try {
-      await api.deleteStock(stock.code);
-      await reloadStocks();
-      if (selectedCode === stock.code) setSelectedCode("");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const syncSelected = async () => {
-    if (!selectedCode) return;
-    setBusy(true);
-    try {
-      await api.sync(selectedCode);
-      await reloadStocks();
-      await loadDetail(selectedCode);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const syncAll = async () => {
-    setBusy(true);
-    try {
-      await api.sync();
-      await reloadStocks();
-      if (selectedCode) await loadDetail(selectedCode);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const runTradingAgents = async () => {
-    if (!selectedCode) return;
-    setReportLoading(true);
-    setReportError("");
-    setReport(null);
-    setReportJob(null);
-    setReportElapsedSeconds(0);
-    try {
-      const nextJob = await api.tradingAgentsReport(selectedCode);
-      setReportJob(nextJob);
-    } catch (requestError) {
-      setReportError((requestError as Error).message);
-      setReportLoading(false);
-    }
-  };
-
-  const exportReport = () => {
-    if (!report || !detail) return;
-    const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.docx`;
-    return exportTradingAgentsWord(name, report, detail.stock.name).catch((error) => {
-      console.error(error);
-      alert("Word 生成失败，请稍后重试。");
-    });
-  };
-
-  const stopTradingAgents = async () => {
-    if (!reportJob) return;
-    try {
-      const nextJob = await api.cancelReportJob(reportJob.id);
-      setReportJob(nextJob);
-      setReportError(nextJob.error || "已停止生成");
-    } catch (requestError) {
-      setReportError((requestError as Error).message);
-    } finally {
-      setReportLoading(false);
-    }
-  };
-
-  return (
-    <div>
-      <section className="border-b border-line pb-5">
-        <div className="mb-4">
-          <h2 className="text-xl font-semibold text-ink">A股自选研究</h2>
-          <p className="mt-1 text-sm leading-6 text-slate-600">维护 A 股自选池，查看本地数据和 TradingAgents 中文报告。</p>
-        </div>
-        <div className="flex flex-col gap-3 md:flex-row md:items-end">
-          <label className="flex-1">
-            <span className="mb-1 block text-sm font-medium text-slate-700">A 股代码</span>
-            <input
-              value={code}
-              onChange={(event) => setCode(event.target.value.replace(/\D/g, "").slice(0, 6))}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") addStock();
-              }}
-              placeholder="例如 600519"
-              className="w-full rounded border border-line bg-white px-3 py-2 outline-none focus:border-accent"
-            />
-          </label>
-          <button
-            disabled={busy || !/^\d{6}$/.test(code)}
-            onClick={addStock}
-            className="inline-flex items-center justify-center gap-2 rounded border border-accent bg-accent px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Search size={16} />
-            {busy ? "处理中" : "添加并同步"}
-          </button>
-          <button
-            disabled={busy || !stocks.length}
-            onClick={syncAll}
-            className="inline-flex items-center justify-center gap-2 rounded border border-line bg-white px-4 py-2 text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <RefreshCw size={16} className={busy ? "animate-spin" : ""} />
-            同步全部
-          </button>
-        </div>
-        <div className="mt-3 grid gap-2 md:max-w-xl">
-          <label>
-            <span className="mb-1 block text-sm font-medium text-slate-700">选择要生成报告的自选股</span>
-            <select
-              value={selectedCode}
-              onChange={(event) => setSelectedCode(event.target.value)}
-              className="w-full rounded border border-line bg-white px-3 py-2 outline-none focus:border-accent"
-              disabled={!stocks.length}
-            >
-              {!stocks.length && <option value="">先添加一只 A 股</option>}
-              {stocks.map((stock) => (
-                <option key={stock.code} value={stock.code}>
-                  {stock.code} ｜ {stock.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          {selectedCode && (
-            <p className="text-sm text-slate-600">当前报告对象：{selectedCode}。也可以在下方表格里点击代码或“选择”。</p>
-          )}
-        </div>
-      </section>
-
-      <Section title="A股自选池">
-        <div className="overflow-x-auto rounded border border-line bg-white">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>代码</th>
-                <th>名称</th>
-                <th>行业</th>
-                <th>最新日期</th>
-                <th>收盘价</th>
-                <th>PE_TTM</th>
-                <th>PB</th>
-                <th>PS</th>
-                <th>换手率</th>
-                <th>市值</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {stocks.map((stock) => (
-                <tr key={stock.code} className={selectedCode === stock.code ? "bg-teal-50" : "hover:bg-slate-50"}>
-                  <td>
-                    <button className="font-mono text-accent" onClick={() => setSelectedCode(stock.code)}>
-                      {stock.code}
-                    </button>
-                  </td>
-                  <td>{stock.name}</td>
-                  <td>{stock.industry || "-"}</td>
-                  <td>{stock.latest_trade_date || "-"}</td>
-                  <td>{formatNumber(stock.close_price)}</td>
-                  <td>{formatNumber(stock.pe_ttm)}</td>
-                  <td>{formatNumber(stock.pb)}</td>
-                  <td>{formatNumber(stock.ps)}</td>
-                  <td>{stock.turnover_rate === null || stock.turnover_rate === undefined ? "-" : `${formatNumber(stock.turnover_rate)}%`}</td>
-                  <td>{formatCompactNumber(stock.market_cap)}</td>
-                  <td>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => setSelectedCode(stock.code)}
-                        className={`inline-flex items-center justify-center rounded border px-3 py-2 text-sm ${
-                          selectedCode === stock.code
-                            ? "border-accent bg-teal-50 text-accent"
-                            : "border-line bg-white text-slate-600 hover:border-accent hover:text-accent"
-                        }`}
-                      >
-                        {selectedCode === stock.code ? "已选择" : "选择"}
-                      </button>
-                      <button
-                        onClick={() => deleteStock(stock)}
-                        className="inline-flex h-9 w-9 items-center justify-center rounded border border-line bg-white text-slate-600 hover:border-red-300 hover:bg-red-50 hover:text-red-700"
-                        title="删除"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {!stocks.length && (
-                <tr>
-                  <td colSpan={11} className="text-center text-slate-500">先添加一只 A 股开始研究。</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Section>
-
-      <ReportHistory assetType="a-share" refreshKey={historyVersion} />
-
-      {detailLoading && !detail && (
-        <Section title="当前自选详情">
-          <div className="rounded border border-line bg-white p-4 text-sm text-slate-600">
-            正在加载 {selectedCode} 的详情...
-          </div>
-        </Section>
-      )}
-
-      {detail && (
-        <>
-          <Section title="当前自选详情">
-            {detailLoading && (
-              <div className="mb-3 inline-flex items-center gap-2 rounded border border-line bg-slate-50 px-3 py-2 text-sm text-slate-600">
-                <RefreshCw size={14} className="animate-spin" />
-                正在刷新详情
-              </div>
-            )}
-            <div className="grid gap-4 md:grid-cols-[1.4fr_.9fr]">
-              <div className="rounded border border-line bg-white p-4">
-                <h2 className="text-xl font-semibold">
-                  {detail.stock.name} <span className="font-mono text-base text-slate-500">{detail.stock.code}</span>
-                </h2>
-                <p className="mt-2 text-sm text-slate-600">{detail.stock.company_profile}</p>
-                <div className="mt-3 text-sm text-slate-700">市场：{detail.stock.market} ｜ 行业：{detail.stock.industry || "-"}</div>
-              </div>
-              <div className="rounded border border-line bg-white p-4">
-                <div className="text-sm font-semibold text-ink">报告对象</div>
-                <div className="mt-2 font-mono text-2xl font-semibold text-accent">{selectedCode}</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  点击生成后会进入任务队列，完成的 agent 分段会自动保存并展示。
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button onClick={syncSelected} disabled={busy} className="inline-flex items-center gap-2 rounded border border-line bg-white px-3 py-2 text-sm text-slate-700 disabled:opacity-50">
-                <RefreshCw size={16} className={busy ? "animate-spin" : ""} />
-                同步当前
-              </button>
-              <button onClick={runTradingAgents} disabled={reportLoading} className="inline-flex items-center gap-2 rounded border border-accent bg-accent px-3 py-2 text-sm text-white disabled:opacity-60">
-                <Sparkles size={16} />
-                {reportLoading ? "生成中" : "生成 TradingAgents 报告"}
-              </button>
-              {reportLoading && reportJob && (
-                <button onClick={stopTradingAgents} className="inline-flex items-center gap-2 rounded border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50">
-                  <Square size={15} />
-                  停止生成
-                </button>
-              )}
-            </div>
-          </Section>
-
-          <Section title="TradingAgents 中文交易报告">
-            <div className="rounded border border-line bg-white p-4">
-              {!report && !reportLoading && !reportError && (
-                <p className="text-sm leading-6 text-slate-600">点击上方按钮后生成 A 股中文交易研究报告。</p>
-              )}
-              {reportLoading && <TradingAgentsProgress elapsedSeconds={reportElapsedSeconds} job={reportJob} />}
-              {reportLoading && reportJob && (
-                <div className="mt-4">
-                  <button
-                    onClick={stopTradingAgents}
-                    className="inline-flex items-center gap-2 rounded border border-red-200 bg-white px-3 py-2 text-sm text-red-700 hover:bg-red-50"
-                  >
-                    <Square size={15} />
-                    停止生成
-                  </button>
-                </div>
-              )}
-              {reportError && (
-                <div className="rounded border border-red-200 bg-red-50 p-3 text-sm leading-6 text-red-700">
-                  {reportError}
-                </div>
-              )}
-              {report && <TradingAgentsReportView report={report} onExport={exportReport} />}
-            </div>
-          </Section>
-
-          <Section title="最新数据">
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="overflow-x-auto rounded border border-line bg-white">
-                <table className="data-table">
-                  <thead><tr><th>日期</th><th>收盘价</th><th>PE_TTM</th><th>PB</th><th>换手率</th><th>来源</th></tr></thead>
-                  <tbody>{detail.daily_metrics.slice(0, 5).map((row) => (
-                    <tr key={String(row.id)}><td>{row.trade_date}</td><td>{formatNumber(row.close_price)}</td><td>{formatNumber(row.pe_ttm)}</td><td>{formatNumber(row.pb)}</td><td>{formatNumber(row.turnover_rate)}</td><td>{row.source || "-"}</td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
-              <div className="overflow-x-auto rounded border border-line bg-white">
-                <table className="data-table">
-                  <thead><tr><th>报告期</th><th>营收增速</th><th>净利增速</th><th>ROE</th><th>负债率</th><th>来源</th></tr></thead>
-                  <tbody>{detail.financial_metrics.slice(0, 5).map((row) => (
-                    <tr key={String(row.id)}><td>{row.report_period}</td><td>{formatNumber(row.revenue_growth)}%</td><td>{formatNumber(row.net_profit_growth)}%</td><td>{formatNumber(row.roe)}%</td><td>{formatNumber(row.debt_asset_ratio)}%</td><td>{row.source || "-"}</td></tr>
-                  ))}</tbody>
-                </table>
-              </div>
-            </div>
-          </Section>
-
-        </>
-      )}
     </div>
   );
 }

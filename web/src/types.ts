@@ -1,29 +1,3 @@
-export type StockListItem = {
-  id: number;
-  code: string;
-  market: string;
-  name: string;
-  industry?: string;
-  company_profile?: string;
-  latest_trade_date?: string;
-  close_price?: number;
-  pe_ttm?: number;
-  pb?: number;
-  ps?: number;
-  turnover_rate?: number;
-  market_cap?: number;
-  total_score?: number;
-  risk_tags: string[];
-};
-
-export type StockDetail = {
-  stock: StockListItem;
-  daily_metrics: Array<Record<string, number | string | null>>;
-  financial_metrics: Array<Record<string, number | string | null>>;
-  announcements: Array<Record<string, number | string | null>>;
-  score: (Record<string, number | string | string[] | null> & { risk_tags: string[] }) | null;
-};
-
 export type TradingAgentsReport = {
   record_id?: number;
   code: string;
