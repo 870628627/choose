@@ -103,9 +103,209 @@ function downloadBlob(filename: string, blob: Blob) {
   window.setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
-function exportTradingAgentsWord(filename: string, report: TradingAgentsReport, stockName?: string) {
-  const content = `\ufeff${buildTradingAgentsHtml(report, stockName)}`;
-  downloadBlob(filename, new Blob([content], { type: "application/msword;charset=utf-8" }));
+async function exportTradingAgentsWord(filename: string, report: TradingAgentsReport, stockName?: string) {
+  const {
+    AlignmentType,
+    BorderStyle,
+    Document,
+    HeadingLevel,
+    Packer,
+    Paragraph,
+    Table,
+    TableCell,
+    TableRow,
+    TextRun,
+    WidthType
+  } = await import("docx");
+  const title = `${stockName ? `${stockName} ` : ""}${report.code} TradingAgents 中文交易报告`;
+  const border = { style: BorderStyle.SINGLE, size: 1, color: "D9E3E7" };
+  const cellMargins = { top: 120, bottom: 120, left: 160, right: 160 };
+
+  const inlineRuns = (text: string) => text.split(/(\*\*[^*]+?\*\*|`[^`]+?`)/g).filter(Boolean).map((part) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return new TextRun({ text: part.slice(2, -2), bold: true, color: "10202D" });
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return new TextRun({ text: part.slice(1, -1), font: "Consolas", color: "334155" });
+    }
+    return new TextRun({ text: part });
+  });
+
+  const paragraph = (text = "", options: Record<string, unknown> = {}) => new Paragraph({
+    spacing: { after: 140 },
+    children: inlineRuns(text),
+    ...options
+  });
+
+  const tableCell = (text: string, header = false) => new TableCell({
+    shading: header ? { fill: "F0F6F6" } : undefined,
+    margins: cellMargins,
+    children: [new Paragraph({
+      children: inlineRuns(text),
+      spacing: { after: 0 },
+      run: { bold: header, color: header ? "223644" : "334155" }
+    })],
+    borders: { top: border, bottom: border, left: border, right: border }
+  });
+
+  const simpleTable = (rows: string[][], headerRows = 1) => new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    borders: { top: border, bottom: border, left: border, right: border, insideHorizontal: border, insideVertical: border },
+    rows: rows.map((row, rowIndex) => new TableRow({
+      children: row.map((cell) => tableCell(cell, rowIndex < headerRows))
+    }))
+  });
+
+  const markdownBlocks = (content: string) => {
+    const lines = content.replace(/\r\n/g, "\n").split("\n");
+    const blocks: Array<InstanceType<typeof Paragraph> | InstanceType<typeof Table>> = [];
+    let index = 0;
+
+    while (index < lines.length) {
+      const line = lines[index].trimEnd();
+      const trimmed = line.trim();
+      if (!trimmed) {
+        index += 1;
+        continue;
+      }
+
+      const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
+      if (heading) {
+        blocks.push(paragraph(heading[2], {
+          heading: heading[1].length <= 2 ? HeadingLevel.HEADING_3 : HeadingLevel.HEADING_4,
+          spacing: { before: 180, after: 100 }
+        }));
+        index += 1;
+        continue;
+      }
+
+      if (isMarkdownTableRow(line) && index + 1 < lines.length && isMarkdownTableSeparator(lines[index + 1])) {
+        const tableLines = [line];
+        index += 2;
+        while (index < lines.length && isMarkdownTableRow(lines[index])) {
+          tableLines.push(lines[index]);
+          index += 1;
+        }
+        blocks.push(simpleTable(tableLines.map(splitMarkdownCells)));
+        continue;
+      }
+
+      if (/^[-*]\s+/.test(trimmed)) {
+        while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+          blocks.push(paragraph(lines[index].trim().replace(/^[-*]\s+/, ""), { bullet: { level: 0 } }));
+          index += 1;
+        }
+        continue;
+      }
+
+      if (/^\d+\.\s+/.test(trimmed)) {
+        let itemIndex = 1;
+        while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+          blocks.push(paragraph(`${itemIndex}. ${lines[index].trim().replace(/^\d+\.\s+/, "")}`));
+          index += 1;
+          itemIndex += 1;
+        }
+        continue;
+      }
+
+      if (trimmed.startsWith("```")) {
+        const codeLines: string[] = [];
+        index += 1;
+        while (index < lines.length && !lines[index].trim().startsWith("```")) {
+          codeLines.push(lines[index]);
+          index += 1;
+        }
+        if (index < lines.length) index += 1;
+        blocks.push(new Paragraph({
+          spacing: { before: 80, after: 140 },
+          children: [new TextRun({ text: codeLines.join("\n"), font: "Consolas", color: "334155" })]
+        }));
+        continue;
+      }
+
+      if (trimmed.startsWith(">")) {
+        const quoteLines: string[] = [];
+        while (index < lines.length && lines[index].trim().startsWith(">")) {
+          quoteLines.push(lines[index].trim().replace(/^>\s?/, ""));
+          index += 1;
+        }
+        blocks.push(paragraph(quoteLines.join(" "), {
+          indent: { left: 360 },
+          border: { left: { style: BorderStyle.SINGLE, size: 8, color: "12A88A" } }
+        }));
+        continue;
+      }
+
+      const paragraphLines = [trimmed];
+      index += 1;
+      while (index < lines.length && lines[index].trim() && !isMarkdownBlockStart(lines[index])) {
+        paragraphLines.push(lines[index].trim());
+        index += 1;
+      }
+      blocks.push(paragraph(paragraphLines.join(" ")));
+    }
+
+    return blocks;
+  };
+
+  const children: Array<InstanceType<typeof Paragraph> | InstanceType<typeof Table>> = [
+    new Paragraph({
+      heading: HeadingLevel.TITLE,
+      alignment: AlignmentType.CENTER,
+      spacing: { after: 180 },
+      children: [new TextRun({ text: title, bold: true, color: "10202D" })]
+    }),
+    simpleTable([
+      ["代码", report.code],
+      ["行情符号", report.symbol],
+      ["分析日期", report.trade_date],
+      ["分段数量", `${Object.values(report.sections).filter((value) => Boolean(value?.trim())).length}`],
+      ["导出时间", new Date().toLocaleString("zh-CN", { hour12: false })]
+    ], 0),
+    paragraph("")
+  ];
+
+  Object.entries(report.sections).forEach(([key, value], index) => {
+    if (!value?.trim()) return;
+    children.push(new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      spacing: { before: index === 0 ? 240 : 360, after: 120 },
+      children: [new TextRun({ text: `${String(index + 1).padStart(2, "0")} ${agentSectionTitle(key)}`, bold: true, color: "10202D" })]
+    }));
+    children.push(...markdownBlocks(String(value).trim()));
+  });
+
+  children.push(
+    new Paragraph({
+      heading: HeadingLevel.HEADING_1,
+      spacing: { before: 360, after: 120 },
+      children: [new TextRun({ text: "风险提示", bold: true, color: "76550B" })]
+    }),
+    paragraph(report.risk_notice, {
+      shading: { fill: "FFF7DF" },
+      border: {
+        top: { style: BorderStyle.SINGLE, size: 1, color: "F0D58A" },
+        bottom: { style: BorderStyle.SINGLE, size: 1, color: "F0D58A" },
+        left: { style: BorderStyle.SINGLE, size: 1, color: "F0D58A" },
+        right: { style: BorderStyle.SINGLE, size: 1, color: "F0D58A" }
+      }
+    })
+  );
+
+  const doc = new Document({
+    creator: "AlphaScope",
+    title,
+    sections: [{
+      properties: {
+        page: {
+          margin: { top: 900, right: 900, bottom: 900, left: 900 }
+        }
+      },
+      children
+    }]
+  });
+  const blob = await Packer.toBlob(doc);
+  downloadBlob(filename, blob);
 }
 
 function formatElapsed(seconds: number) {
@@ -655,8 +855,11 @@ function HomeView() {
   const expandedReport = showcaseReports.find((record) => record.id === expandedReportId);
   const exportShowcaseReport = (record: ShowcaseReportRecord) => {
     const label = record.display_name || record.symbol;
-    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.doc`;
-    exportTradingAgentsWord(name, record.report, record.display_name);
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.docx`;
+    return exportTradingAgentsWord(name, record.report, record.display_name).catch((error) => {
+      console.error(error);
+      alert("Word 生成失败，请稍后重试。");
+    });
   };
 
   return (
@@ -1081,8 +1284,11 @@ function AssetReportPage({
 
   const exportReport = () => {
     if (!report) return;
-    const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.doc`;
-    exportTradingAgentsWord(name, report);
+    const name = `${safeFileName(report.code)}-${safeFileName(report.trade_date)}.docx`;
+    return exportTradingAgentsWord(name, report).catch((error) => {
+      console.error(error);
+      alert("Word 生成失败，请稍后重试。");
+    });
   };
 
   const stopReport = async () => {
@@ -1359,8 +1565,11 @@ function AShareView({
 
   const exportReport = () => {
     if (!report || !detail) return;
-    const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.doc`;
-    exportTradingAgentsWord(name, report, detail.stock.name);
+    const name = `${safeFileName(report.code)}-${safeFileName(detail.stock.name || "TradingAgents")}-${safeFileName(report.trade_date)}.docx`;
+    return exportTradingAgentsWord(name, report, detail.stock.name).catch((error) => {
+      console.error(error);
+      alert("Word 生成失败，请稍后重试。");
+    });
   };
 
   const stopTradingAgents = async () => {
@@ -1675,8 +1884,11 @@ function ReportHistory({
 
   const exportRecord = (record: ReportRecord) => {
     const label = record.display_name || record.symbol;
-    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.doc`;
-    exportTradingAgentsWord(name, record.report, record.display_name);
+    const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.docx`;
+    return exportTradingAgentsWord(name, record.report, record.display_name).catch((error) => {
+      console.error(error);
+      alert("Word 生成失败，请稍后重试。");
+    });
   };
 
   const stopJob = async (job: ReportJob) => {
@@ -1839,8 +2051,22 @@ function ReportHistory({
   );
 }
 
-function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsReport; onExport: () => void }) {
+function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsReport; onExport: () => void | Promise<void> }) {
   const sectionEntries = Object.entries(report.sections).filter(([, value]) => Boolean(value?.trim()));
+  const [exporting, setExporting] = useState(false);
+
+  const handleExport = async () => {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      await onExport();
+    } catch (error) {
+      console.error(error);
+      alert("Word 生成失败，请稍后重试。");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -1856,12 +2082,13 @@ function TradingAgentsReportView({ report, onExport }: { report: TradingAgentsRe
             </div>
           </div>
           <button
-            onClick={onExport}
-            className="inline-flex items-center justify-center gap-2 rounded border border-emerald-300/40 bg-emerald-300 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-200"
+            onClick={handleExport}
+            disabled={exporting}
+            className="inline-flex items-center justify-center gap-2 rounded border border-emerald-300/40 bg-emerald-300 px-3 py-2 text-sm text-slate-950 hover:bg-emerald-200 disabled:cursor-wait disabled:opacity-70"
             title="导出 Word"
           >
-            <Download size={16} />
-            导出Word
+            {exporting ? <Activity size={16} className="animate-pulse" /> : <Download size={16} />}
+            {exporting ? "生成Word中" : "导出Word"}
           </button>
         </div>
       </div>
