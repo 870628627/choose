@@ -81,6 +81,10 @@ export type ReportRecord = {
   report: TradingAgentsReport;
 };
 
+export type ReportSummary = Omit<ReportRecord, "report"> & {
+  report_size?: number;
+};
+
 export type ShowcaseReportRecord = ReportRecord & {
   owner_email?: string;
   is_showcased: boolean;

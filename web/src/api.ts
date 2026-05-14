@@ -1,4 +1,4 @@
-import type { AdminUser, AuthSession, AuthUser, ReportJob, ReportRecord, ShowcaseReportRecord, StockDetail, StockListItem } from "./types";
+import type { AdminUser, AuthSession, AuthUser, ReportJob, ReportRecord, ReportSummary, ShowcaseReportRecord, StockDetail, StockListItem } from "./types";
 
 const jsonHeaders = { "Content-Type": "application/json" };
 const tokenKey = "alphascope_token";
@@ -77,7 +77,8 @@ export const api = {
       body: JSON.stringify({ showcased })
     }),
   reports: (assetType?: ReportRecord["asset_type"]) =>
-    request<ReportRecord[]>(assetType ? `/api/reports?asset_type=${encodeURIComponent(assetType)}` : "/api/reports"),
+    request<ReportSummary[]>(assetType ? `/api/reports?asset_type=${encodeURIComponent(assetType)}` : "/api/reports"),
+  report: (id: number) => request<ReportRecord>(`/api/reports/${id}`),
   reportJobs: (assetType?: ReportRecord["asset_type"]) =>
     request<ReportJob[]>(assetType ? `/api/report-jobs?asset_type=${encodeURIComponent(assetType)}` : "/api/report-jobs"),
   reportJob: (id: number) => request<ReportJob>(`/api/report-jobs/${id}`),

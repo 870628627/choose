@@ -20,7 +20,7 @@ import {
   UserPlus
 } from "lucide-react";
 import { api, getAuthToken, setAuthToken } from "./api";
-import type { AdminUser, AuthSession, ReportJob, ReportRecord, ShowcaseReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
+import type { AdminUser, AuthSession, ReportJob, ReportRecord, ReportSummary, ShowcaseReportRecord, StockDetail, StockListItem, TradingAgentsReport } from "./types";
 
 type View = "home" | "a-share" | "us" | "crypto" | "admin";
 
@@ -1836,7 +1836,9 @@ function ReportHistory({
   assetType: ReportRecord["asset_type"];
   refreshKey: number;
 }) {
-  const [records, setRecords] = useState<ReportRecord[]>([]);
+  const [records, setRecords] = useState<ReportSummary[]>([]);
+  const [recordDetails, setRecordDetails] = useState<Record<number, ReportRecord>>({});
+  const [detailLoadingId, setDetailLoadingId] = useState<number | null>(null);
   const [jobs, setJobs] = useState<ReportJob[]>([]);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1851,6 +1853,10 @@ function ReportHistory({
         api.reportJobs(assetType)
       ]);
       setRecords(nextRecords);
+      setRecordDetails((current) => {
+        const visibleIds = new Set(nextRecords.map((record) => record.id));
+        return Object.fromEntries(Object.entries(current).filter(([id]) => visibleIds.has(Number(id))));
+      });
       setJobs(nextJobs.filter((job) => job.status !== "completed"));
       if (expandedId && !nextRecords.some((record) => record.id === expandedId)) {
         setExpandedId(null);
@@ -1874,21 +1880,54 @@ function ReportHistory({
     return () => window.clearInterval(timer);
   }, [assetType, jobs]);
 
-  const deleteRecord = async (record: ReportRecord) => {
+  const ensureRecordDetail = async (record: ReportSummary) => {
+    const cached = recordDetails[record.id];
+    if (cached) return cached;
+    setDetailLoadingId(record.id);
+    try {
+      const detail = await api.report(record.id);
+      setRecordDetails((current) => ({ ...current, [record.id]: detail }));
+      return detail;
+    } finally {
+      setDetailLoadingId((current) => current === record.id ? null : current);
+    }
+  };
+
+  const toggleRecord = (record: ReportSummary) => {
+    const expanded = expandedId === record.id;
+    if (expanded) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(record.id);
+    ensureRecordDetail(record).catch((requestError) => {
+      setError((requestError as Error).message);
+    });
+  };
+
+  const deleteRecord = async (record: ReportSummary) => {
     const confirmed = window.confirm(`确定删除 ${record.symbol} ${record.trade_date} 的报告记录吗？`);
     if (!confirmed) return;
     await api.deleteReport(record.id);
     setRecords((current) => current.filter((item) => item.id !== record.id));
+    setRecordDetails((current) => {
+      const next = { ...current };
+      delete next[record.id];
+      return next;
+    });
     if (expandedId === record.id) setExpandedId(null);
   };
 
-  const exportRecord = (record: ReportRecord) => {
+  const exportRecord = async (record: ReportSummary) => {
     const label = record.display_name || record.symbol;
     const name = `${safeFileName(record.symbol)}-${safeFileName(label)}-${safeFileName(record.trade_date)}.docx`;
-    return exportTradingAgentsWord(name, record.report, record.display_name).catch((error) => {
+    try {
+      const detail = await ensureRecordDetail(record);
+      await exportTradingAgentsWord(name, detail.report, record.display_name);
+    } catch (error) {
       console.error(error);
       alert("Word 生成失败，请稍后重试。");
-    });
+    }
   };
 
   const stopJob = async (job: ReportJob) => {
@@ -2000,11 +2039,13 @@ function ReportHistory({
         ))}
         {records.map((record) => {
           const expanded = expandedId === record.id;
+          const detail = recordDetails[record.id];
+          const detailLoading = detailLoadingId === record.id;
           return (
             <article key={record.id} className="border-b border-line last:border-b-0">
               <div className="flex flex-col gap-3 px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
                 <button
-                  onClick={() => setExpandedId(expanded ? null : record.id)}
+                  onClick={() => toggleRecord(record)}
                   className="flex min-w-0 flex-1 items-center gap-3 text-left"
                 >
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded border border-line bg-slate-50 text-accent">
@@ -2039,7 +2080,14 @@ function ReportHistory({
               {expanded && (
                 <div className="border-t border-line bg-slate-50 p-4">
                   <div className="rounded border border-line bg-white p-4">
-                    <TradingAgentsReportView report={record.report} onExport={() => exportRecord(record)} />
+                    {detail ? (
+                      <TradingAgentsReportView report={detail.report} onExport={() => exportRecord(record)} />
+                    ) : (
+                      <div className="flex items-center gap-2 text-sm text-slate-500">
+                        <RefreshCw size={15} className={detailLoading ? "animate-spin" : ""} />
+                        正在加载报告正文...
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

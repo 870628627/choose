@@ -71,6 +71,18 @@ function reportRow(row: Record<string, unknown>) {
   };
 }
 
+function reportSummaryRow(row: Record<string, unknown>) {
+  return {
+    id: Number(row.id),
+    asset_type: String(row.asset_type),
+    symbol: String(row.symbol),
+    display_name: row.display_name ? String(row.display_name) : "",
+    trade_date: String(row.trade_date),
+    created_at: String(row.created_at),
+    report_size: Number(row.report_size || 0)
+  };
+}
+
 function showcasedReportRow(row: Record<string, unknown>) {
   return {
     ...reportRow(row),
@@ -442,7 +454,15 @@ app.get("/api/reports", requireAuth, (req, res) => {
     ? db
       .prepare(
         `
-        SELECT * FROM trading_reports
+        SELECT
+          id,
+          asset_type,
+          symbol,
+          display_name,
+          trade_date,
+          created_at,
+          length(report_json) AS report_size
+        FROM trading_reports
         WHERE user_id = ? AND asset_type = ? AND deleted_at IS NULL
         ORDER BY created_at DESC, id DESC
         LIMIT 100
@@ -452,14 +472,44 @@ app.get("/api/reports", requireAuth, (req, res) => {
     : db
       .prepare(
         `
-        SELECT * FROM trading_reports
+        SELECT
+          id,
+          asset_type,
+          symbol,
+          display_name,
+          trade_date,
+          created_at,
+          length(report_json) AS report_size
+        FROM trading_reports
         WHERE user_id = ? AND deleted_at IS NULL
         ORDER BY created_at DESC, id DESC
         LIMIT 100
       `
       )
       .all(user.id);
-  res.json(rows.map((row) => reportRow(row as Record<string, unknown>)));
+  res.json(rows.map((row) => reportSummaryRow(row as Record<string, unknown>)));
+});
+
+app.get("/api/reports/:id", requireAuth, (req, res) => {
+  const user = (req as AuthenticatedRequest).user;
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    res.status(400).json({ error: "Report id is invalid" });
+    return;
+  }
+  const row = db
+    .prepare(
+      `
+      SELECT * FROM trading_reports
+      WHERE id = ? AND user_id = ? AND deleted_at IS NULL
+    `
+    )
+    .get(id, user.id) as Record<string, unknown> | undefined;
+  if (!row) {
+    res.status(404).json({ error: "Report not found" });
+    return;
+  }
+  res.json(reportRow(row));
 });
 
 app.delete("/api/reports/:id", requireAuth, (req, res) => {

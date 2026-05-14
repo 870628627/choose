@@ -98,7 +98,8 @@ function getQueuePosition(row: ReportJobRow) {
   return Number(result.count) + 1;
 }
 
-function buildJobSnapshot(row: ReportJobRow) {
+function buildJobSnapshot(row: ReportJobRow, options: { includeReportRecord?: boolean } = {}) {
+  const includeReportRecord = options.includeReportRecord ?? true;
   const sections = db
     .prepare(
       `
@@ -128,7 +129,7 @@ function buildJobSnapshot(row: ReportJobRow) {
     completed_at: row.completed_at || "",
     updated_at: row.updated_at,
     sections,
-    report_record: getReportById(row.report_id)
+    report_record: includeReportRecord ? getReportById(row.report_id) : null
   };
 }
 
@@ -144,7 +145,7 @@ export function listReportJobsForUser(userId: number, assetType?: string) {
       .prepare(
         `
         SELECT * FROM report_jobs
-        WHERE user_id = ? AND asset_type = ?
+        WHERE user_id = ? AND asset_type = ? AND status != 'completed'
         ORDER BY created_at DESC, id DESC
         LIMIT 30
       `
@@ -154,14 +155,14 @@ export function listReportJobsForUser(userId: number, assetType?: string) {
       .prepare(
         `
         SELECT * FROM report_jobs
-        WHERE user_id = ?
+        WHERE user_id = ? AND status != 'completed'
         ORDER BY created_at DESC, id DESC
         LIMIT 30
       `
       )
       .all(userId);
 
-  return rows.map((row) => buildJobSnapshot(row as ReportJobRow));
+  return rows.map((row) => buildJobSnapshot(row as ReportJobRow, { includeReportRecord: false }));
 }
 
 export function cancelReportJobForUser(jobId: number, userId: number) {

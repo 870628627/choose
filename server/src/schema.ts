@@ -50,6 +50,7 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
 
     CREATE INDEX IF NOT EXISTS idx_auth_sessions_token_hash ON auth_sessions(token_hash);
     CREATE INDEX IF NOT EXISTS idx_trading_reports_user_created ON trading_reports(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_trading_reports_user_asset_created ON trading_reports(user_id, asset_type, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS report_showcase (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,6 +87,7 @@ export function initializeSchema(db: { exec: (sql: string) => void }) {
     );
 
     CREATE INDEX IF NOT EXISTS idx_report_jobs_user_created ON report_jobs(user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_report_jobs_user_status_created ON report_jobs(user_id, status, created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_report_jobs_status_created ON report_jobs(status, created_at ASC);
 
     CREATE TABLE IF NOT EXISTS report_job_sections (
