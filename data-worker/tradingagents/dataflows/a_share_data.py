@@ -8,6 +8,7 @@ from typing import Optional
 
 import pandas as pd
 import requests
+from .a_share_mcp import get_mcp_ohlcv
 
 _EMPTY_OHLCV_COLUMNS = ["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]
 
@@ -45,6 +46,16 @@ def _eastmoney_secid(code: str) -> str:
     return f"{market}.{code}"
 
 
+def _tushare_symbol(code: str) -> str:
+    if code.startswith("6"):
+        return f"{code}.SH"
+    if code.startswith(("0", "2", "3")):
+        return f"{code}.SZ"
+    if code.startswith(("4", "8")):
+        return f"{code}.BJ"
+    return code
+
+
 def _baostock_symbol(code: str) -> str:
     return f"sh.{code}" if code.startswith("6") else f"sz.{code}"
 
@@ -71,8 +82,19 @@ def _normalize_ohlcv(data: pd.DataFrame) -> pd.DataFrame:
 
 
 def _configured_sources() -> list[str]:
-    raw = os.getenv("TRADINGAGENTS_A_SHARE_PRICE_SOURCES", "baostock,eastmoney,akshare")
+    raw = os.getenv("TRADINGAGENTS_A_SHARE_PRICE_SOURCES", "sina_mcp,zhiyan_mcp,tushare,baostock,eastmoney,akshare")
     aliases = {
+        "sina": "sina_mcp",
+        "sina_mcp": "sina_mcp",
+        "sina-mcp": "sina_mcp",
+        "ashare": "sina_mcp",
+        "ashare_mcp": "sina_mcp",
+        "ashare-mcp": "sina_mcp",
+        "zhiyan": "zhiyan_mcp",
+        "zhiyan_mcp": "zhiyan_mcp",
+        "zhiyan-mcp": "zhiyan_mcp",
+        "ts": "tushare",
+        "tushare": "tushare",
         "bao": "baostock",
         "baostock": "baostock",
         "yf": "yfinance",
@@ -89,7 +111,7 @@ def _configured_sources() -> list[str]:
         source = aliases.get(item.strip().lower())
         if source and source not in sources:
             sources.append(source)
-    return sources or ["baostock", "eastmoney", "akshare"]
+    return sources or ["sina_mcp", "zhiyan_mcp", "tushare", "baostock", "eastmoney", "akshare"]
 
 
 def _source_timeout_seconds() -> float:
@@ -100,7 +122,12 @@ def _source_timeout_seconds() -> float:
 
 
 def _source_label(source: str) -> str:
-    return "Yahoo Finance / yfinance" if source == "yfinance" else source
+    labels = {
+        "sina_mcp": "Sina Finance MCP",
+        "zhiyan_mcp": "Zhiyan MCP",
+        "yfinance": "Yahoo Finance / yfinance",
+    }
+    return labels.get(source, source)
 
 
 def _dataframe_to_markdown(data: pd.DataFrame) -> str:
@@ -122,6 +149,9 @@ def _source_worker(source: str, symbol: str, start_date: str, end_date: str, que
 
 def _load_source_direct(source: str, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     loaders = {
+        "sina_mcp": get_sina_mcp_ohlcv,
+        "zhiyan_mcp": get_zhiyan_mcp_ohlcv,
+        "tushare": get_tushare_ohlcv,
         "yfinance": get_yfinance_a_share_ohlcv,
         "baostock": get_baostock_ohlcv,
         "eastmoney": get_eastmoney_ohlcv,
@@ -201,6 +231,58 @@ def get_baostock_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFr
         "Close": raw["close"],
         "Adj Close": raw["close"],
         "Volume": raw["volume"],
+    })
+    return _normalize_ohlcv(data)
+
+
+def get_sina_mcp_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+    return get_mcp_ohlcv("sina", code, start_date, end_date)
+
+
+def get_zhiyan_mcp_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+    return get_mcp_ohlcv("zhiyan", code, start_date, end_date)
+
+
+def get_tushare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+
+    token = os.getenv("TUSHARE_TOKEN") or os.getenv("TRADINGAGENTS_TUSHARE_TOKEN")
+    if not token:
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
+
+    try:
+        import tushare as ts  # type: ignore
+    except Exception:
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
+
+    try:
+        pro = ts.pro_api(token)
+        raw = pro.daily(
+            ts_code=_tushare_symbol(code),
+            start_date=start_date.replace("-", ""),
+            end_date=end_date.replace("-", ""),
+        )
+    except Exception:
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
+
+    data = pd.DataFrame({
+        "Date": raw["trade_date"],
+        "Open": raw["open"],
+        "High": raw["high"],
+        "Low": raw["low"],
+        "Close": raw["close"],
+        "Adj Close": raw["close"],
+        "Volume": pd.to_numeric(raw["vol"], errors="coerce") * 100,
     })
     return _normalize_ohlcv(data)
 
