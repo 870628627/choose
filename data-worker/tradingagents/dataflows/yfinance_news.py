@@ -9,6 +9,9 @@ from dateutil.relativedelta import relativedelta
 from .config import get_config
 from .stockstats_utils import yf_retry
 
+_NEWS_CACHE: dict[tuple[str, int], list] = {}
+_SEARCH_CACHE: dict[tuple[str, int], list] = {}
+
 
 def _extract_article_data(article: dict) -> dict:
     """Extract article data from yfinance news format (handles nested 'content' structure)."""
@@ -69,17 +72,20 @@ def get_news_yfinance(
     """
     article_limit = get_config()["news_article_limit"]
     try:
-        stock = yf.Ticker(ticker)
-        news = yf_retry(lambda: stock.get_news(count=article_limit))
+        cache_key = (ticker.upper(), article_limit)
+        if cache_key not in _NEWS_CACHE:
+            stock = yf.Ticker(ticker)
+            _NEWS_CACHE[cache_key] = yf_retry(lambda: stock.get_news(count=article_limit))
+        news = list(_NEWS_CACHE[cache_key])
 
         if not news:
-            return f"No news found for {ticker}"
+            return f"## Yahoo Finance News: {ticker.upper()}\n\nYahoo Finance did not return news for this ticker."
 
         # Parse date range for filtering
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
-        news_str = ""
+        rows = []
         filtered_count = 0
 
         for article in news:
@@ -91,21 +97,31 @@ def get_news_yfinance(
                 if not (start_dt <= pub_date_naive <= end_dt + relativedelta(days=1)):
                     continue
 
-            news_str += f"### {data['title']} (source: {data['publisher']})\n"
-            if data["summary"]:
-                news_str += f"{data['summary']}\n"
-            if data["link"]:
-                news_str += f"Link: {data['link']}\n"
-            news_str += "\n"
+            publish_time = ""
+            if data["pub_date"]:
+                publish_time = data["pub_date"].strftime("%Y-%m-%d %H:%M")
+            rows.append(
+                f"### {filtered_count + 1}. {data['title']}\n\n"
+                f"- Publisher: {data['publisher']}\n"
+                f"- Published: {publish_time or 'Yahoo Finance 未返回该字段'}\n"
+                f"- URL: {data['link'] or 'Yahoo Finance 未返回该字段'}\n\n"
+                f"{data['summary'] or 'Yahoo Finance 未返回摘要。'}\n"
+            )
             filtered_count += 1
 
         if filtered_count == 0:
-            return f"No news found for {ticker} between {start_date} and {end_date}"
+            return f"## Yahoo Finance News: {ticker.upper()}\n\nNo Yahoo Finance news found between {start_date} and {end_date}."
 
-        return f"## {ticker} News, from {start_date} to {end_date}:\n\n{news_str}"
+        return (
+            f"## Yahoo Finance News: {ticker.upper()}\n\n"
+            f"- Source: Yahoo Finance / yfinance\n"
+            f"- Range: {start_date} to {end_date}\n"
+            f"- Articles: {filtered_count}\n\n"
+            + "\n".join(rows)
+        )
 
     except Exception as e:
-        return f"Error fetching news for {ticker}: {str(e)}"
+        return f"## Yahoo Finance News: {ticker.upper()}\n\nYahoo Finance news request failed: {str(e)}"
 
 
 def get_global_news_yfinance(
@@ -138,14 +154,18 @@ def get_global_news_yfinance(
 
     try:
         for query in search_queries:
-            search = yf_retry(lambda q=query: yf.Search(
-                query=q,
-                news_count=limit,
-                enable_fuzzy_query=True,
-            ))
+            cache_key = (query, limit)
+            if cache_key not in _SEARCH_CACHE:
+                search = yf_retry(lambda q=query: yf.Search(
+                    query=q,
+                    news_count=limit,
+                    enable_fuzzy_query=True,
+                ))
+                _SEARCH_CACHE[cache_key] = list(search.news or [])
+            search_news = _SEARCH_CACHE[cache_key]
 
-            if search.news:
-                for article in search.news:
+            if search_news:
+                for article in search_news:
                     # Handle both flat and nested structures
                     if "content" in article:
                         data = _extract_article_data(article)
@@ -162,14 +182,14 @@ def get_global_news_yfinance(
                 break
 
         if not all_news:
-            return f"No global news found for {curr_date}"
+            return f"## Yahoo Finance Global News\n\nNo global news found for {curr_date}."
 
         # Calculate date range
         curr_dt = datetime.strptime(curr_date, "%Y-%m-%d")
         start_dt = curr_dt - relativedelta(days=look_back_days)
         start_date = start_dt.strftime("%Y-%m-%d")
 
-        news_str = ""
+        rows = []
         for article in all_news[:limit]:
             # Handle both flat and nested structures
             if "content" in article:
@@ -189,14 +209,19 @@ def get_global_news_yfinance(
                 link = article.get("link", "")
                 summary = ""
 
-            news_str += f"### {title} (source: {publisher})\n"
-            if summary:
-                news_str += f"{summary}\n"
-            if link:
-                news_str += f"Link: {link}\n"
-            news_str += "\n"
+            rows.append(
+                f"### {title}\n\n"
+                f"- Publisher: {publisher}\n"
+                f"- URL: {link or 'Yahoo Finance 未返回该字段'}\n\n"
+                f"{summary or 'Yahoo Finance 未返回摘要。'}\n"
+            )
 
-        return f"## Global Market News, from {start_date} to {curr_date}:\n\n{news_str}"
+        return (
+            f"## Yahoo Finance Global Market News\n\n"
+            f"- Source: Yahoo Finance / yfinance\n"
+            f"- Range: {start_date} to {curr_date}\n\n"
+            + "\n".join(rows)
+        )
 
     except Exception as e:
-        return f"Error fetching global news: {str(e)}"
+        return f"## Yahoo Finance Global News\n\nYahoo Finance global news request failed: {str(e)}"

@@ -8,6 +8,145 @@ from .a_share_data import format_akshare_stock_data, is_a_share_symbol
 from .market_fallback_data import format_fallback_stock_data, has_market_fallback, is_crypto_symbol
 from .stockstats_utils import StockstatsUtils, _clean_dataframe, yf_retry, load_ohlcv, filter_financials_by_date
 
+_TICKER_CACHE: dict[str, yf.Ticker] = {}
+_HISTORY_CACHE: dict[tuple[str, str, str], pd.DataFrame] = {}
+_INFO_CACHE: dict[str, dict] = {}
+_STATEMENT_CACHE: dict[tuple[str, str, str], pd.DataFrame] = {}
+
+
+def _ticker(symbol: str) -> yf.Ticker:
+    normalized = symbol.strip().upper()
+    if normalized not in _TICKER_CACHE:
+        _TICKER_CACHE[normalized] = yf.Ticker(normalized)
+    return _TICKER_CACHE[normalized]
+
+
+def _history(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    key = (symbol.strip().upper(), start_date, end_date)
+    if key not in _HISTORY_CACHE:
+        _HISTORY_CACHE[key] = yf_retry(
+            lambda: _ticker(key[0]).history(start=start_date, end=end_date)
+        )
+    return _HISTORY_CACHE[key].copy()
+
+
+def _ticker_info(symbol: str) -> dict:
+    normalized = symbol.strip().upper()
+    if normalized not in _INFO_CACHE:
+        info = yf_retry(lambda: _ticker(normalized).info)
+        _INFO_CACHE[normalized] = info or {}
+    return dict(_INFO_CACHE[normalized])
+
+
+def _statement(symbol: str, statement: str, freq: str) -> pd.DataFrame:
+    normalized = symbol.strip().upper()
+    normalized_freq = freq.lower()
+    key = (normalized, statement, normalized_freq)
+    if key not in _STATEMENT_CACHE:
+        ticker_obj = _ticker(normalized)
+        if statement == "balance_sheet":
+            loader = lambda: ticker_obj.quarterly_balance_sheet if normalized_freq == "quarterly" else ticker_obj.balance_sheet
+        elif statement == "cashflow":
+            loader = lambda: ticker_obj.quarterly_cashflow if normalized_freq == "quarterly" else ticker_obj.cashflow
+        elif statement == "income_statement":
+            loader = lambda: ticker_obj.quarterly_income_stmt if normalized_freq == "quarterly" else ticker_obj.income_stmt
+        else:
+            raise ValueError(f"Unsupported Yahoo Finance statement: {statement}")
+        _STATEMENT_CACHE[key] = yf_retry(loader)
+    return _STATEMENT_CACHE[key].copy()
+
+
+def _format_number(value) -> str:
+    if value is None or pd.isna(value):
+        return "Yahoo Finance 未返回该字段"
+    if isinstance(value, (int, float)):
+        abs_value = abs(value)
+        if abs_value >= 1_000_000_000:
+            return f"{value / 1_000_000_000:.2f}B"
+        if abs_value >= 1_000_000:
+            return f"{value / 1_000_000:.2f}M"
+        if 0 < abs_value < 1:
+            return f"{value:.4f}"
+        return f"{value:,.2f}"
+    return str(value)
+
+
+def _dataframe_to_markdown(data: pd.DataFrame, max_rows: int | None = None) -> str:
+    frame = data.head(max_rows).copy() if max_rows else data.copy()
+    columns = [str(column) for column in frame.columns]
+    rows = ["| " + " | ".join(columns) + " |"]
+    rows.append("| " + " | ".join(["---"] * len(columns)) + " |")
+    for _, row in frame.iterrows():
+        rows.append("| " + " | ".join(str(row[column]) for column in frame.columns) + " |")
+    if max_rows and len(data) > max_rows:
+        rows.append(f"\n... {len(data) - max_rows} more rows omitted from tool context.")
+    return "\n".join(rows)
+
+
+def _format_ohlcv_output(symbol: str, start_date: str, end_date: str, data: pd.DataFrame, source: str) -> str:
+    output = data.copy()
+    if getattr(output.index, "tz", None) is not None:
+        output.index = output.index.tz_localize(None)
+    if "Date" not in output.columns:
+        output = output.reset_index()
+    if "Date" not in output.columns and "Datetime" in output.columns:
+        output = output.rename(columns={"Datetime": "Date"})
+    required = ["Date", "Open", "High", "Low", "Close", "Volume"]
+    missing = [column for column in required if column not in output.columns]
+    if missing:
+        return (
+            f"## Yahoo Finance price data unavailable for {symbol.upper()}\n\n"
+            f"Missing columns: {', '.join(missing)}"
+        )
+    output = output[required].copy()
+    output["Date"] = pd.to_datetime(output["Date"], errors="coerce").dt.strftime("%Y-%m-%d")
+    for column in ["Open", "High", "Low", "Close"]:
+        output[column] = pd.to_numeric(output[column], errors="coerce").round(2)
+    output["Volume"] = pd.to_numeric(output["Volume"], errors="coerce").fillna(0).astype("int64")
+
+    latest = output.dropna(subset=["Date", "Close"]).tail(1)
+    summary = ""
+    if not latest.empty:
+        row = latest.iloc[0]
+        summary = f"- Latest close: {row['Close']} on {row['Date']}\n- Latest volume: {row['Volume']}\n"
+
+    return (
+        f"## Price Data: {symbol.upper()}\n\n"
+        f"- Source: {source}\n"
+        f"- Range: {start_date} to {end_date}\n"
+        f"- Records: {len(output)}\n"
+        f"- Retrieved at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        f"{summary}\n"
+        f"### OHLCV\n\n"
+        f"{_dataframe_to_markdown(output)}"
+    )
+
+
+def _format_statement_output(ticker: str, title: str, freq: str, curr_date: str | None, data: pd.DataFrame) -> str:
+    data = filter_financials_by_date(data, curr_date)
+    if data.empty:
+        return (
+            f"## {title}: {ticker.upper()} ({freq})\n\n"
+            f"Yahoo Finance did not return {title.lower()} data for this ticker."
+        )
+    output = data.copy()
+    output.columns = [
+        column.strftime("%Y-%m-%d") if hasattr(column, "strftime") else str(column)
+        for column in output.columns
+    ]
+    output = output.reset_index().rename(columns={"index": "Line Item"})
+    for column in output.columns:
+        if column != "Line Item":
+            output[column] = output[column].map(_format_number)
+
+    return (
+        f"## {title}: {ticker.upper()} ({freq})\n\n"
+        f"- Source: Yahoo Finance / yfinance\n"
+        f"- Look-ahead guard date: {curr_date or 'not provided'}\n"
+        f"- Retrieved at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"{_dataframe_to_markdown(output, max_rows=40)}"
+    )
+
 def get_YFin_data_online(
     symbol: Annotated[str, "ticker symbol of the company"],
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
@@ -29,12 +168,8 @@ def get_YFin_data_online(
         except Exception as fallback_error:
             print(f"Fallback market data failed for {symbol}: {fallback_error}")
 
-    # Create ticker object
-    ticker = yf.Ticker(symbol.upper())
-
-    # Fetch historical data for the specified date range
     try:
-        data = yf_retry(lambda: ticker.history(start=start_date, end=end_date))
+        data = _history(symbol, start_date, end_date)
     except Exception as error:
         if has_market_fallback(symbol):
             try:
@@ -46,7 +181,6 @@ def get_YFin_data_online(
                 )
         return f"Error retrieving Yahoo Finance stock data for {symbol}: {error}"
 
-    # Check if data is empty
     if data.empty:
         if has_market_fallback(symbol):
             try:
@@ -56,27 +190,9 @@ def get_YFin_data_online(
                     f"No Yahoo Finance data found for symbol '{symbol}' between {start_date} and {end_date}; "
                     f"fallback source failed with {fallback_error}"
                 )
-        return f"No data found for symbol '{symbol}' between {start_date} and {end_date}"
+        return f"No Yahoo Finance data found for symbol '{symbol}' between {start_date} and {end_date}"
 
-    # Remove timezone info from index for cleaner output
-    if data.index.tz is not None:
-        data.index = data.index.tz_localize(None)
-
-    # Round numerical values to 2 decimal places for cleaner display
-    numeric_columns = ["Open", "High", "Low", "Close", "Adj Close"]
-    for col in numeric_columns:
-        if col in data.columns:
-            data[col] = data[col].round(2)
-
-    # Convert DataFrame to CSV string
-    csv_string = data.to_csv()
-
-    # Add header information
-    header = f"# Stock data for {symbol.upper()} from {start_date} to {end_date}\n"
-    header += f"# Total records: {len(data)}\n"
-    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-    return header + csv_string
+    return _format_ohlcv_output(symbol, start_date, end_date, data, "Yahoo Finance / yfinance")
 
 def get_stock_stats_indicators_window(
     symbol: Annotated[str, "ticker symbol of the company"],
@@ -291,55 +407,51 @@ def get_fundamentals(
 ):
     """Get company fundamentals overview from yfinance."""
     try:
-        ticker_obj = yf.Ticker(ticker.upper())
-        info = yf_retry(lambda: ticker_obj.info)
+        info = _ticker_info(ticker)
 
         if not info:
-            return f"No fundamentals data found for symbol '{ticker}'"
+            return f"## Fundamentals: {ticker.upper()}\n\nYahoo Finance did not return fundamentals data for this ticker."
 
         fields = [
-            ("Name", info.get("longName")),
+            ("Company Name", info.get("longName") or info.get("shortName")),
             ("Sector", info.get("sector")),
             ("Industry", info.get("industry")),
             ("Market Cap", info.get("marketCap")),
             ("PE Ratio (TTM)", info.get("trailingPE")),
             ("Forward PE", info.get("forwardPE")),
-            ("PEG Ratio", info.get("pegRatio")),
-            ("Price to Book", info.get("priceToBook")),
             ("EPS (TTM)", info.get("trailingEps")),
             ("Forward EPS", info.get("forwardEps")),
+            ("Return on Equity", info.get("returnOnEquity")),
+            ("Gross Margin", info.get("grossMargins")),
+            ("Profit Margin", info.get("profitMargins")),
             ("Dividend Yield", info.get("dividendYield")),
-            ("Beta", info.get("beta")),
             ("52 Week High", info.get("fiftyTwoWeekHigh")),
             ("52 Week Low", info.get("fiftyTwoWeekLow")),
-            ("50 Day Average", info.get("fiftyDayAverage")),
-            ("200 Day Average", info.get("twoHundredDayAverage")),
-            ("Revenue (TTM)", info.get("totalRevenue")),
-            ("Gross Profit", info.get("grossProfits")),
-            ("EBITDA", info.get("ebitda")),
+            ("Beta", info.get("beta")),
+            ("Total Revenue", info.get("totalRevenue")),
             ("Net Income", info.get("netIncomeToCommon")),
-            ("Profit Margin", info.get("profitMargins")),
+            ("EBITDA", info.get("ebitda")),
+            ("Free Cash Flow", info.get("freeCashflow")),
             ("Operating Margin", info.get("operatingMargins")),
-            ("Return on Equity", info.get("returnOnEquity")),
             ("Return on Assets", info.get("returnOnAssets")),
             ("Debt to Equity", info.get("debtToEquity")),
             ("Current Ratio", info.get("currentRatio")),
-            ("Book Value", info.get("bookValue")),
-            ("Free Cash Flow", info.get("freeCashflow")),
         ]
 
-        lines = []
-        for label, value in fields:
-            if value is not None:
-                lines.append(f"{label}: {value}")
+        table = pd.DataFrame(
+            [{"Metric": label, "Value": _format_number(value)} for label, value in fields]
+        )
 
-        header = f"# Company Fundamentals for {ticker.upper()}\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-        return header + "\n".join(lines)
+        return (
+            f"## Fundamentals: {ticker.upper()}\n\n"
+            f"- Source: Yahoo Finance / yfinance\n"
+            f"- Retrieved at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            f"### Key Metrics\n\n"
+            f"{_dataframe_to_markdown(table)}"
+        )
 
     except Exception as e:
-        return f"Error retrieving fundamentals for {ticker}: {str(e)}"
+        return f"## Fundamentals: {ticker.upper()}\n\nYahoo Finance fundamentals request failed: {str(e)}"
 
 
 def get_balance_sheet(
@@ -349,29 +461,11 @@ def get_balance_sheet(
 ):
     """Get balance sheet data from yfinance."""
     try:
-        ticker_obj = yf.Ticker(ticker.upper())
-
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_balance_sheet)
-        else:
-            data = yf_retry(lambda: ticker_obj.balance_sheet)
-
-        data = filter_financials_by_date(data, curr_date)
-
-        if data.empty:
-            return f"No balance sheet data found for symbol '{ticker}'"
-            
-        # Convert to CSV string for consistency with other functions
-        csv_string = data.to_csv()
-        
-        # Add header information
-        header = f"# Balance Sheet data for {ticker.upper()} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        
-        return header + csv_string
+        data = _statement(ticker, "balance_sheet", freq)
+        return _format_statement_output(ticker, "Balance Sheet", freq, curr_date, data)
         
     except Exception as e:
-        return f"Error retrieving balance sheet for {ticker}: {str(e)}"
+        return f"## Balance Sheet: {ticker.upper()} ({freq})\n\nYahoo Finance balance sheet request failed: {str(e)}"
 
 
 def get_cashflow(
@@ -381,29 +475,11 @@ def get_cashflow(
 ):
     """Get cash flow data from yfinance."""
     try:
-        ticker_obj = yf.Ticker(ticker.upper())
-
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_cashflow)
-        else:
-            data = yf_retry(lambda: ticker_obj.cashflow)
-
-        data = filter_financials_by_date(data, curr_date)
-
-        if data.empty:
-            return f"No cash flow data found for symbol '{ticker}'"
-            
-        # Convert to CSV string for consistency with other functions
-        csv_string = data.to_csv()
-        
-        # Add header information
-        header = f"# Cash Flow data for {ticker.upper()} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        
-        return header + csv_string
+        data = _statement(ticker, "cashflow", freq)
+        return _format_statement_output(ticker, "Cash Flow", freq, curr_date, data)
         
     except Exception as e:
-        return f"Error retrieving cash flow for {ticker}: {str(e)}"
+        return f"## Cash Flow: {ticker.upper()} ({freq})\n\nYahoo Finance cash flow request failed: {str(e)}"
 
 
 def get_income_statement(
@@ -413,29 +489,11 @@ def get_income_statement(
 ):
     """Get income statement data from yfinance."""
     try:
-        ticker_obj = yf.Ticker(ticker.upper())
-
-        if freq.lower() == "quarterly":
-            data = yf_retry(lambda: ticker_obj.quarterly_income_stmt)
-        else:
-            data = yf_retry(lambda: ticker_obj.income_stmt)
-
-        data = filter_financials_by_date(data, curr_date)
-
-        if data.empty:
-            return f"No income statement data found for symbol '{ticker}'"
-            
-        # Convert to CSV string for consistency with other functions
-        csv_string = data.to_csv()
-        
-        # Add header information
-        header = f"# Income Statement data for {ticker.upper()} ({freq})\n"
-        header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        
-        return header + csv_string
+        data = _statement(ticker, "income_statement", freq)
+        return _format_statement_output(ticker, "Income Statement", freq, curr_date, data)
         
     except Exception as e:
-        return f"Error retrieving income statement for {ticker}: {str(e)}"
+        return f"## Income Statement: {ticker.upper()} ({freq})\n\nYahoo Finance income statement request failed: {str(e)}"
 
 
 def get_insider_transactions(

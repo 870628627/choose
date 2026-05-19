@@ -9,6 +9,8 @@ from typing import Optional
 import pandas as pd
 import requests
 
+_EMPTY_OHLCV_COLUMNS = ["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]
+
 
 def a_share_code(symbol: str) -> Optional[str]:
     normalized = symbol.strip().upper()
@@ -47,14 +49,25 @@ def _baostock_symbol(code: str) -> str:
     return f"sh.{code}" if code.startswith("6") else f"sz.{code}"
 
 
+def yahoo_a_share_symbol(symbol: str) -> str:
+    code = a_share_code(symbol)
+    if not code:
+        raise ValueError(f"{symbol} is not an A-share symbol")
+    if code.startswith("6"):
+        return f"{code}.SS"
+    if code.startswith(("0", "2", "3")):
+        return f"{code}.SZ"
+    raise ValueError(f"{symbol} is not supported by Yahoo Finance A-share suffix mapping")
+
+
 def _normalize_ohlcv(data: pd.DataFrame) -> pd.DataFrame:
     if data.empty:
-        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
     data["Date"] = pd.to_datetime(data["Date"], errors="coerce")
     for column in ["Open", "High", "Low", "Close", "Adj Close", "Volume"]:
         data[column] = pd.to_numeric(data[column], errors="coerce")
     data = data.dropna(subset=["Date", "Close"]).sort_values("Date")
-    return data[["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"]].reset_index(drop=True)
+    return data[_EMPTY_OHLCV_COLUMNS].reset_index(drop=True)
 
 
 def _configured_sources() -> list[str]:
@@ -62,6 +75,10 @@ def _configured_sources() -> list[str]:
     aliases = {
         "bao": "baostock",
         "baostock": "baostock",
+        "yf": "yfinance",
+        "yfin": "yfinance",
+        "yahoo": "yfinance",
+        "yfinance": "yfinance",
         "eastmoney": "eastmoney",
         "em": "eastmoney",
         "ak": "akshare",
@@ -82,6 +99,19 @@ def _source_timeout_seconds() -> float:
         return 20.0
 
 
+def _source_label(source: str) -> str:
+    return "Yahoo Finance / yfinance" if source == "yfinance" else source
+
+
+def _dataframe_to_markdown(data: pd.DataFrame) -> str:
+    columns = [str(column) for column in data.columns]
+    rows = ["| " + " | ".join(columns) + " |"]
+    rows.append("| " + " | ".join(["---"] * len(columns)) + " |")
+    for _, row in data.iterrows():
+        rows.append("| " + " | ".join(str(row[column]) for column in data.columns) + " |")
+    return "\n".join(rows)
+
+
 def _source_worker(source: str, symbol: str, start_date: str, end_date: str, queue):
     try:
         data = _load_source_direct(source, symbol, start_date, end_date)
@@ -92,6 +122,7 @@ def _source_worker(source: str, symbol: str, start_date: str, end_date: str, que
 
 def _load_source_direct(source: str, symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     loaders = {
+        "yfinance": get_yfinance_a_share_ohlcv,
         "baostock": get_baostock_ohlcv,
         "eastmoney": get_eastmoney_ohlcv,
         "akshare": get_akshare_native_ohlcv,
@@ -156,7 +187,7 @@ def get_baostock_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFr
         while result.next():
             rows.append(result.get_row_data())
         if not rows:
-            return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+            return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
         raw = pd.DataFrame(rows, columns=result.fields)
     finally:
         with redirect_stdout(StringIO()):
@@ -197,7 +228,7 @@ def get_eastmoney_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataF
     payload = response.json()
     klines = (payload.get("data") or {}).get("klines") or []
     if not klines:
-        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
 
     rows = []
     for item in klines:
@@ -226,7 +257,7 @@ def get_akshare_native_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.
     try:
         import akshare as ak  # type: ignore
     except Exception:
-        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
 
     try:
         raw = ak.stock_zh_a_hist(
@@ -237,9 +268,9 @@ def get_akshare_native_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.
             adjust=""
         )
     except Exception:
-        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
     if raw is None or raw.empty:
-        return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
 
     date_col = _column(raw, ["日期", "date", "Date"])
     open_col = _column(raw, ["开盘", "open", "Open"])
@@ -260,6 +291,26 @@ def get_akshare_native_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.
     return _normalize_ohlcv(data)
 
 
+def get_yfinance_a_share_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
+    yahoo_symbol = yahoo_a_share_symbol(symbol)
+    try:
+        import yfinance as yf  # type: ignore
+    except Exception:
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
+
+    try:
+        raw = yf.Ticker(yahoo_symbol).history(start=start_date, end=end_date)
+    except Exception:
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
+    if raw is None or raw.empty:
+        return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
+
+    data = raw.reset_index()
+    if "Adj Close" not in data.columns:
+        data["Adj Close"] = data["Close"]
+    return _normalize_ohlcv(data)
+
+
 def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFrame:
     code = a_share_code(symbol)
     if not code:
@@ -269,26 +320,30 @@ def get_akshare_ohlcv(symbol: str, start_date: str, end_date: str) -> pd.DataFra
         try:
             data = _load_source_with_timeout(source, symbol, start_date, end_date)
             if not data.empty:
+                data.attrs["source"] = source
                 return data
         except Exception:
             pass
-    return pd.DataFrame(columns=["Date", "Open", "High", "Low", "Close", "Adj Close", "Volume"])
+    return pd.DataFrame(columns=_EMPTY_OHLCV_COLUMNS)
 
 
 def format_akshare_stock_data(symbol: str, start_date: str, end_date: str) -> str:
     data = get_akshare_ohlcv(symbol, start_date, end_date)
     if data.empty:
-        return f"No AKShare A-share data found for symbol '{symbol}' between {start_date} and {end_date}"
+        return f"No configured A-share data found for symbol '{symbol}' between {start_date} and {end_date}"
 
     output = data.copy()
     for column in ["Open", "High", "Low", "Close", "Adj Close"]:
         output[column] = output[column].round(2)
     output["Date"] = output["Date"].dt.strftime("%Y-%m-%d")
-    output = output.set_index("Date")
 
-    header = f"# A-share stock data for {symbol.upper()} from {start_date} to {end_date}\n"
-    header += f"# Source priority: {', '.join(_configured_sources())}\n"
-    header += f"# Total records: {len(output)}\n"
-    header += f"# Data retrieved on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-
-    return header + output.to_csv()
+    return (
+        f"## A-share Price Data: {symbol.upper()}\n\n"
+        f"- Source: {_source_label(data.attrs.get('source', 'configured A-share source'))}\n"
+        f"- Source priority: {', '.join(_configured_sources())}\n"
+        f"- Range: {start_date} to {end_date}\n"
+        f"- Records: {len(output)}\n"
+        f"- Retrieved at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        f"### OHLCV\n\n"
+        f"{_dataframe_to_markdown(output)}"
+    )
